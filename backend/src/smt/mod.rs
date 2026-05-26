@@ -38,7 +38,7 @@ fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
 /// 백엔드 컴파일러 파이프라인 진입점
 /// [KOR] Program 객체를 받아 각 목표(Goal)에 대해 파이프라인을 순차적으로 수행합니다.
 ///       RAVENCHECK_DUMP_IR 환경 변수가 설정된 경우 중간 변환 결과(IR)를 logs 폴더에 파일로 저장합니다.
-pub fn encode_and_solve(program: Program) {
+pub fn encode_and_solve(program: Program) -> Result<(), String> {
     println!("\n⛓️ [Backend] Starting Pipeline for {} goals...", program.goals.len());
     
     // 1. 디버깅 플래그 확인 (RAVENCHECK_DUMP_IR)
@@ -87,11 +87,11 @@ pub fn encode_and_solve(program: Program) {
     // 2. EPR 프래그먼트 검사 (Sort Cycle Check) - RelAbs 이후에 수행!
     let goals_for_check: Vec<_> = relabs_goals.iter().map(|(_, expr)| expr.clone()).collect();
     if let Err(cycles) = check_for_cycles(&goals_for_check, &program.functions) {
-        println!("🚨 [EPR Check Failed] Found Sort Cycles! This breaks decidability.");
+        let mut err_msg = String::from("Found Sort Cycles! This breaks decidability.\n");
         for c in cycles {
-            println!("   Cycle: {}", render_cycle(&c));
+            err_msg.push_str(&format!("   Cycle: {}\n", render_cycle(&c)));
         }
-        return; // 사이클이 발견되면 SMT 인코딩을 중단합니다.
+        return Err(err_msg);
     } else {
         println!("✅ [EPR Check Passed] No sort cycles detected. Logic is decidable.");
     }
@@ -186,14 +186,16 @@ pub fn encode_and_solve(program: Program) {
         
         match ctx.check().unwrap() {
             easy_smt::Response::Sat => {
-                println!("  ❌ [Failed] Solver returned SAT (Counterexample exists for {})", goal_name);
+                return Err(format!("Failed to verify '{}': solver found counterexamples", goal_name));
+            }
+            easy_smt::Response::Unknown => {
+                return Err(format!("Verification of '{}' cannot proceed: solver returned UNKNOWN", goal_name));
             }
             easy_smt::Response::Unsat => {
                 println!("  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)", goal_name);
             }
-            easy_smt::Response::Unknown => {
-                println!("  ❓ [Unknown] Solver returned UNKNOWN for {}", goal_name);
-            }
         }
     }
+    
+    Ok(())
 }

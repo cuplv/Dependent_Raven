@@ -144,31 +144,49 @@ pub fn module(_attrs: TokenStream, input: TokenStream) -> TokenStream {
         }
         
         *items = new_items;
-        
-        // 런타임에 실행될 #[test] 함수 생성
-        let test_fn = quote! {
-            #[cfg(test)]
-            mod ravencheck_tests {
-                use super::*;
+    }
+    
+    // 원래 모듈의 이름을 가져와서 테스트 모듈 이름을 동적으로 생성합니다.
+    let mod_name = &module.ident;
+    let test_mod_name = syn::Ident::new(&format!("{}_tests", mod_name), mod_name.span());
+
+    // 런타임에 실행될 #[test] 함수 생성 (모듈 바깥으로 뺌)
+    let test_mod = quote! {
+        #[cfg(test)]
+        mod #test_mod_name {
+            use super::*;
+            
+            #[test]
+            fn check_properties() {
+                let mut program = frontend::ast::Program {
+                    datatypes: std::collections::HashMap::new(),
+                    functions: std::collections::HashMap::new(),
+                    goals: std::vec::Vec::new(),
+                };
                 
-                #[test]
-                fn check_properties() {
-                    let mut program = frontend::ast::Program {
-                        datatypes: std::collections::HashMap::new(),
-                        functions: std::collections::HashMap::new(),
-                        goals: std::vec::Vec::new(),
-                    };
-                    
-                    #(#stmts)*
-                    
-                    // 백엔드 컴파일러 파이프라인 진입점 호출
-                    backend::smt::encode_and_solve(program);
+                #(#stmts)*
+                
+                // 백엔드 컴파일러 파이프라인 진입점 호출
+                match backend::smt::encode_and_solve(program) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let mut s = String::new();
+                        s.push_str("\n\n#########[ verification failed ]#########\n");
+                        s.push_str("##\n");
+                        s.push_str(&format!("## > {}\n", e));
+                        s.push_str("##\n");
+                        s.push_str("#########################################\n\n");
+                        
+                        panic!("{}", s);
+                    }
                 }
             }
-        };
-        
-        items.push(syn::parse2(test_fn).unwrap());
-    }
+        }
+    };
 
-    quote!(#module).into()
+    // 원래 모듈(#module)과 테스트 모듈(#test_mod)을 나란히 배치
+    quote! {
+        #module
+        #test_mod
+    }.into()
 }
