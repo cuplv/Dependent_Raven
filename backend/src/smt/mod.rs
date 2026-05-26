@@ -99,12 +99,15 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     // 3. SMT 인코딩 및 실행
     let mut config = SolverConfig::default();
     
+    // 로그 폴더가 없으면 미리 생성합니다.
+    let _ = fs::create_dir_all("logs");
+    
     for (goal_name, relabs_expr) in relabs_goals {
         println!("🎯 Solving Goal: {}", goal_name);
 
-        if dump_ir {
-            config.set_log_file(format!("logs/{}_4_query.smt2", goal_name));
-        }
+        // 무조건 .smt2 파일에 로그를 남기도록 설정합니다.
+        let smt_log_path = format!("logs/{}_failed_query.smt2", goal_name);
+        config.set_log_file(smt_log_path.clone());
         
         let mut builder = config.context_builder();
         let mut ctx = builder.build().expect("Failed to build SMT context");
@@ -186,12 +189,20 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         
         match ctx.check().unwrap() {
             easy_smt::Response::Sat => {
-                return Err(format!("Failed to verify '{}': solver found counterexamples", goal_name));
+                return Err(format!(
+                    "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}", 
+                    goal_name, smt_log_path
+                ));
             }
             easy_smt::Response::Unknown => {
-                return Err(format!("Verification of '{}' cannot proceed: solver returned UNKNOWN", goal_name));
+                return Err(format!(
+                    "Verification of '{}' cannot proceed: solver returned UNKNOWN.\n## > 💾 Check the SMT query at: {}", 
+                    goal_name, smt_log_path
+                ));
             }
             easy_smt::Response::Unsat => {
+                // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
+                let _ = fs::remove_file(&smt_log_path);
                 println!("  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)", goal_name);
             }
         }
