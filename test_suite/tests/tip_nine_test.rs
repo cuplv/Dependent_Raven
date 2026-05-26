@@ -1,10 +1,8 @@
-use macros::module;
-
 // TIP Benchmark Example
 // A classic example: Proving the commutativity of natural number addition
 // using F* style refinement types and uncurried signatures.
 
-#[module]
+#[ravencheck::module]
 mod tip_benchmarks {
 
     // 1. Inductive Datatype Definition for Natural Numbers

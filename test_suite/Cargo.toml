@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 frontend = { path = "../frontend" }
 backend = { path = "../backend" }
-macros = { path = "../macros" }
+ravencheck = { package = "macros", path = "../macros" }
