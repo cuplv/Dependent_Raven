@@ -7,7 +7,7 @@ use syn::{ItemFn, ItemEnum, Type as SynType, PathArguments, GenericArgument};
 /// [ENG] Register #[define] enum: Parses inductive datatypes and registers them in Program's datatypes.
 ///       Includes logic to extract T from Box<T> used for recursive type definitions.
 pub fn register_enum(program: &mut Program, enum_name: &str, enum_str: &str) {
-    println!("🚀 [API] Registering #[define] enum: {}", enum_name);
+    println!(" [API] Registering #[define] enum: {}", enum_name);
     
     let item_enum: ItemEnum = syn::parse_str(enum_str).expect("Failed to parse declared enum");
     
@@ -57,7 +57,7 @@ pub fn register_enum(program: &mut Program, enum_name: &str, enum_str: &str) {
 /// [KOR] #[declare] 함수 등록: 본문은 완전히 무시하고 시그니처만 추출하여 저장합니다.
 /// [ENG] Register #[declare] function: Completely ignores the body and extracts only the signature.
 pub fn register_declare(program: &mut Program, fn_name: &str, fn_str: &str) {
-    println!("🚀 [API] Registering #[declare] function: {}", fn_name);
+    println!(" [API] Registering #[declare] function: {}", fn_name);
     
     let item_fn: ItemFn = syn::parse_str(fn_str).expect("Failed to parse declared function");
     
@@ -96,7 +96,7 @@ fn extract_signature_from_fn(item_fn: &ItemFn) -> Type {
 ///       시그니처가 없으면 Rust AST에서 추론하며, 본문(body)이 있으면 무조건 typecheck_expr를 태워서 VC를 생성합니다.
 ///       이제 Lemma도 단순한 함수 타입(Unit 반환)으로 처리되므로, 모든 증명과 함수가 동일한 파이프라인을 탑니다!
 pub fn register_val(program: &mut Program, fn_name: &str, sig_str: Option<&str>, fn_str: &str, is_recursive: bool) {
-    println!("🚀 [API] Registering function (or lemma): {}", fn_name);
+    println!(" [API] Registering function (or lemma): {}", fn_name);
     
     let item_fn: ItemFn = syn::parse_str(fn_str).expect("Failed to parse declared function");
     
@@ -166,10 +166,10 @@ pub fn register_val(program: &mut Program, fn_name: &str, sig_str: Option<&str>,
         // [ENG] If `check_expr` successfully accumulates VCs, the type checking for this entire function holds logically.
     });
 
-    println!("  ✅ Generated VCs for {}: {} items", fn_name, vcs.len());
-    for (i, vc) in vcs.iter().enumerate() {
-        println!("     [Raw VC {}]:\n{:#?}", i, vc);
-    }
+    // println!("  ✅ Generated VCs for {}: {} items", fn_name, vcs.len());
+    // for (i, vc) in vcs.iter().enumerate() {
+    //     println!("     [Raw VC {}]:\n{:#?}", i, vc);
+    // }
 
     if !vcs.is_empty() {
         let mut combined_vc = vcs[0].clone();

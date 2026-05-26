@@ -39,7 +39,7 @@ fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
 /// [KOR] Program 객체를 받아 각 목표(Goal)에 대해 파이프라인을 순차적으로 수행합니다.
 ///       RAVENCHECK_DUMP_IR 환경 변수가 설정된 경우 중간 변환 결과(IR)를 logs 폴더에 파일로 저장합니다.
 pub fn encode_and_solve(program: Program) -> Result<(), String> {
-    println!("\n⛓️ [Backend] Starting Pipeline for {} goals...", program.goals.len());
+    println!("\n [Backend] Starting Pipeline for {} goals...", program.goals.len());
     
     // 1. 디버깅 플래그 확인 (RAVENCHECK_DUMP_IR)
     let dump_ir = env::var("RAVENCHECK_DUMP_IR").is_ok();
@@ -93,7 +93,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         }
         return Err(err_msg);
     } else {
-        println!("✅ [EPR Check Passed] No sort cycles detected. Logic is decidable.");
+        println!(" [EPR Check Passed] No sort cycles detected. Logic is decidable.");
     }
 
     // 3. SMT 인코딩 및 실행
@@ -103,7 +103,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     let _ = fs::create_dir_all("logs");
     
     for (goal_name, relabs_expr) in relabs_goals {
-        println!("🎯 Solving Goal: {}", goal_name);
+        println!(" Solving Goal: {}", goal_name);
 
         // 무조건 .smt2 파일에 로그를 남기도록 설정합니다.
         let smt_log_path = format!("logs/{}_failed_query.smt2", goal_name);
