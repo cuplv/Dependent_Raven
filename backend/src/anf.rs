@@ -116,26 +116,30 @@ fn flatten(expr: &Expr, gen: &mut NameGenerator) -> AnfResult {
         // 6. 데이터 타입 생성자 (Constructor)
         // [KOR] 생성자 또한 SMT 솔버에서는 관계식(Relation)으로 치환되어야 하므로,
         //       일반 함수 호출과 마찬가지로 반드시 임시 변수에 할당해야 합니다.
-        // [ENG] Constructors are also treated as relations in SMT, 
-        //       so they must be let-bound to a temporary variable just like function calls.
+        //       단, 인자가 0개인 생성자(예: `Nat::Z`)는 상수(Constant) 취급하여 평탄화하지 않습니다!
         Expr::Constructor { name, args } => {
-            let mut all_bindings = vec![];
-            let mut new_args = vec![];
-            for arg in args {
-                let (mut bindings, core) = flatten(arg, gen);
-                all_bindings.append(&mut bindings);
-                new_args.push(core);
+            if args.is_empty() {
+                // 상수는 임시 변수에 할당할 필요가 없음
+                (vec![], expr.clone())
+            } else {
+                let mut all_bindings = vec![];
+                let mut new_args = vec![];
+                for arg in args {
+                    let (mut bindings, core) = flatten(arg, gen);
+                    all_bindings.append(&mut bindings);
+                    new_args.push(core);
+                }
+                
+                let flat_cons = Expr::Constructor {
+                    name: name.clone(),
+                    args: new_args,
+                };
+
+                let fresh_var = gen.fresh();
+                all_bindings.push((fresh_var.clone(), flat_cons));
+
+                (all_bindings, Expr::Var(fresh_var))
             }
-            
-            let flat_cons = Expr::Constructor {
-                name: name.clone(),
-                args: new_args,
-            };
-
-            let fresh_var = gen.fresh();
-            all_bindings.push((fresh_var.clone(), flat_cons));
-
-            (all_bindings, Expr::Var(fresh_var))
         }
 
         // 7. 조건문 (If)

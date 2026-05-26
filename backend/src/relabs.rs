@@ -67,16 +67,35 @@ fn relabs(expr: &Expr, is_pos: bool, global_specs: &HashMap<Ident, FunctionDef>)
                         global_specs
                     )
                 }
-                // 생성자 호출 (Constructor(args)) - 생성자도 SMT에서는 관계로 취급됨
+                // 생성자 호출 (Constructor(args))
                 Expr::Constructor { name, args } => {
-                    transform_call_to_rel(
-                        &var_name,
-                        name,
-                        args,
-                        body,
-                        is_pos,
-                        global_specs
-                    )
+                    if args.is_empty() {
+                        // [KOR] 인자가 없는 생성자는 관계식으로 쪼개지 않고 상수로 치환합니다!
+                        //       let v = Nat::Z in body  =>  body[Nat::Z / v] 처럼 바인딩을 제거하고 
+                        //       바로 내부를 변환하도록 할 수도 있지만, 
+                        //       여기서는 SMT-LIB에 친화적인 상수 식별자로 바꿔서 Let 구조를 유지하거나 치환합니다.
+                        //       간단히 `body` 내부의 `var_name`을 상수로 치환하고 RelAbs를 계속 진행하는 것이 가장 깔끔합니다.
+                        let const_name = name.replace("::", "__");
+                        
+                        // 임시 헬퍼: AST 치환 (frontend::env::substitute_expr 재사용 가능하지만, 백엔드 의존성 분리를 위해 간단히 놔둠)
+                        // 사실상 ANF 단계에서 인자 없는 생성자는 let 바인딩을 아예 안 하도록 고칠 것이기 때문에,
+                        // 만약 여기까지 왔다면 그냥 Let을 유지하되 bound_expr를 Var로 바꿔줍니다.
+                        Expr::Let {
+                            pat: pat.clone(),
+                            bound_expr: Box::new(Expr::Var(const_name)),
+                            body: Box::new(relabs(body, is_pos, global_specs)),
+                        }
+                    } else {
+                        // 인자가 있는 생성자는 기존처럼 관계식으로 변환
+                        transform_call_to_rel(
+                            &var_name,
+                            name,
+                            args,
+                            body,
+                            is_pos,
+                            global_specs
+                        )
+                    }
                 }
                 // 만약 바운드된 수식이 이미 ApplyRel이라면(드문 케이스지만), 그 자체를 사용
                 Expr::ApplyRel { relation, args } => {
@@ -168,6 +187,11 @@ fn relabs(expr: &Expr, is_pos: bool, global_specs: &HashMap<Ident, FunctionDef>)
         // --------------------------------------------------------------------
         // 6. 에러 케이스 (Error Cases)
         // --------------------------------------------------------------------
+        Expr::Constructor { name, args } if args.is_empty() => {
+            // 인자가 없는 생성자는 상수로 취급되어 ANF에서 Let으로 감싸지 않고 맨몸으로 넘어옵니다.
+            let const_name = name.replace("::", "__");
+            Expr::Var(const_name)
+        }
         Expr::Call { .. } | Expr::Constructor { .. } => {
             panic!("RelAbs Error: Found bare Call/Constructor. ANF should have wrapped these in Let bindings.");
         }

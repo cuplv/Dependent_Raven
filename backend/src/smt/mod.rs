@@ -127,27 +127,34 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         for (enum_name, variants) in &program.datatypes {
             let out_type = BaseType::Custom(enum_name.clone());
             for (cons_name, arg_types) in variants {
-                // RelAbs 단계에서 생성자는 `{enum_name}::{cons_name}_rel` 형태로 변환됨
-                let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name)); 
-                
-                let mut smt_args = Vec::new();
-                for ty in arg_types {
-                    smt_args.push(ctx.atom(render_sort(ty)));
+                if arg_types.is_empty() {
+                    // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
+                    let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name)); 
+                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type))).unwrap();
+                    // 상수는 Functionality와 Injectivity 공리가 필요 없습니다.
+                } else {
+                    // [KOR] 인자가 있는 생성자 (예: Nat::S)는 관계식으로 변환됨
+                    let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name)); 
+                    
+                    let mut smt_args = Vec::new();
+                    for ty in arg_types {
+                        smt_args.push(ctx.atom(render_sort(ty)));
+                    }
+                    smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
+                    
+                    // (declare-fun ...)
+                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool")).unwrap();
+                    
+                    // Functionality Axiom
+                    let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
+                    let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
+                    ctx.assert(func_ax_smt).unwrap();
+                    
+                    // Injectivity Axiom
+                    let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
+                    let inj_ax_smt = expr_to_smt(&mut ctx, &inj_ax).unwrap();
+                    ctx.assert(inj_ax_smt).unwrap();
                 }
-                smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
-                
-                // (declare-fun ...)
-                ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool")).unwrap();
-                
-                // Functionality Axiom
-                let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
-                let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
-                ctx.assert(func_ax_smt).unwrap();
-                
-                // Injectivity Axiom
-                let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
-                let inj_ax_smt = expr_to_smt(&mut ctx, &inj_ax).unwrap();
-                ctx.assert(inj_ax_smt).unwrap();
             }
             
             // Disjointness Axiom
@@ -155,9 +162,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 for j in (i + 1)..variants.len() {
                     let (cons1, args1) = &variants[i];
                     let (cons2, args2) = &variants[j];
-                    let rel1 = sanitize_id(&format!("{}::{}_rel", enum_name, cons1));
-                    let rel2 = sanitize_id(&format!("{}::{}_rel", enum_name, cons2));
-                    let disj_ax = disjointness_axiom(&rel1, args1, &rel2, args2, &out_type);
+                    
+                    let disj_ax = disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
                     let disj_ax_smt = expr_to_smt(&mut ctx, &disj_ax).unwrap();
                     ctx.assert(disj_ax_smt).unwrap();
                 }

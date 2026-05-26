@@ -128,50 +128,114 @@ pub fn injectivity_axiom(cons_name: &str, input_types: &[BaseType], output_type:
 
 /// [KOR] Disjointness Axiom (분리성 공리) 생성
 ///       서로 다른 두 생성자는 결코 같은 결과값을 낼 수 없습니다.
-///       ∀ x, y, r. (C1(x, r) ∧ C2(y, r)) ⟹ False
-/// [ENG] Generates Disjointness Axiom.
-///       Two different constructors can never produce the same result.
+///       - Case A (둘 다 상수): C1 != C2
+///       - Case B (하나 상수, 하나 관계식): ∀ x, r. C_rel(x, r) ⟹ r != C_const
+///       - Case C (둘 다 관계식): ∀ x, y, r. (C1_rel(x, r) ∧ C2_rel(y, r)) ⟹ False
+/// [ENG] Generates Disjointness Axiom for different constructors.
 pub fn disjointness_axiom(
+    enum_name: &str,
     cons1_name: &str, inputs1: &[BaseType],
     cons2_name: &str, inputs2: &[BaseType],
     output_type: &BaseType
 ) -> Expr {
-    let mut binders = Vec::new();
-    let mut args1 = Vec::new();
-    let mut args2 = Vec::new();
+    let is_c1_const = inputs1.is_empty();
+    let is_c2_const = inputs2.is_empty();
 
-    // 1. C1의 인자 바인딩 (x_0, ...)
-    for (i, ty) in inputs1.iter().enumerate() {
-        let v = var_name("c1_in", i);
-        binders.push((v.clone(), ty.clone()));
-        args1.push(Expr::Var(v));
-    }
+    let name1 = if is_c1_const {
+        format!("{}::{}", enum_name, cons1_name)
+    } else {
+        format!("{}::{}_rel", enum_name, cons1_name)
+    };
 
-    // 2. C2의 인자 바인딩 (y_0, ...)
-    for (i, ty) in inputs2.iter().enumerate() {
-        let v = var_name("c2_in", i);
-        binders.push((v.clone(), ty.clone()));
-        args2.push(Expr::Var(v));
-    }
+    let name2 = if is_c2_const {
+        format!("{}::{}", enum_name, cons2_name)
+    } else {
+        format!("{}::{}_rel", enum_name, cons2_name)
+    };
 
-    // 3. 공통 결과 변수 (r)
-    let r = "res".to_string();
-    binders.push((r.clone(), output_type.clone()));
-    args1.push(Expr::Var(r.clone()));
-    args2.push(Expr::Var(r.clone()));
+    match (is_c1_const, is_c2_const) {
+        (true, true) => {
+            // Case A: 둘 다 상수인 경우 (C1 != C2)
+            Expr::BinOp {
+                op: BinOp::Neq,
+                left: Box::new(Expr::Var(name1)),
+                right: Box::new(Expr::Var(name2)),
+            }
+        }
+        (true, false) | (false, true) => {
+            // Case B: 하나는 상수, 하나는 관계식인 경우
+            let (const_name, rel_name, rel_inputs) = if is_c1_const {
+                (name1, name2, inputs2)
+            } else {
+                (name2, name1, inputs1)
+            };
 
-    // 4. C1(X, r) ∧ C2(Y, r) ⟹ False
-    let rel1 = Expr::ApplyRel { relation: cons1_name.to_string(), args: args1 };
-    let rel2 = Expr::ApplyRel { relation: cons2_name.to_string(), args: args2 };
-    
-    let condition = Expr::BinOp { op: BinOp::And, left: Box::new(rel1), right: Box::new(rel2) };
+            let mut binders = Vec::new();
+            let mut rel_args = Vec::new();
 
-    Expr::Forall {
-        binders,
-        body: Box::new(Expr::BinOp {
-            op: BinOp::Implies,
-            left: Box::new(condition),
-            right: Box::new(Expr::BoolConst(false)), // False를 함의 (즉, 절대 동시에 일어날 수 없음)
-        })
+            for (i, ty) in rel_inputs.iter().enumerate() {
+                let v = var_name("in", i);
+                binders.push((v.clone(), ty.clone()));
+                rel_args.push(Expr::Var(v));
+            }
+
+            let r = "res".to_string();
+            binders.push((r.clone(), output_type.clone()));
+            rel_args.push(Expr::Var(r.clone()));
+
+            // C_rel(X, res) ⟹ res != C_const
+            let condition = Expr::ApplyRel { relation: rel_name, args: rel_args };
+            let conclusion = Expr::BinOp {
+                op: BinOp::Neq,
+                left: Box::new(Expr::Var(r)),
+                right: Box::new(Expr::Var(const_name)),
+            };
+
+            Expr::Forall {
+                binders,
+                body: Box::new(Expr::BinOp {
+                    op: BinOp::Implies,
+                    left: Box::new(condition),
+                    right: Box::new(conclusion),
+                })
+            }
+        }
+        (false, false) => {
+            // Case C: 둘 다 관계식인 경우
+            let mut binders = Vec::new();
+            let mut args1 = Vec::new();
+            let mut args2 = Vec::new();
+
+            for (i, ty) in inputs1.iter().enumerate() {
+                let v = var_name("c1_in", i);
+                binders.push((v.clone(), ty.clone()));
+                args1.push(Expr::Var(v));
+            }
+
+            for (i, ty) in inputs2.iter().enumerate() {
+                let v = var_name("c2_in", i);
+                binders.push((v.clone(), ty.clone()));
+                args2.push(Expr::Var(v));
+            }
+
+            let r = "res".to_string();
+            binders.push((r.clone(), output_type.clone()));
+            args1.push(Expr::Var(r.clone()));
+            args2.push(Expr::Var(r.clone()));
+
+            let rel1 = Expr::ApplyRel { relation: name1, args: args1 };
+            let rel2 = Expr::ApplyRel { relation: name2, args: args2 };
+            
+            let condition = Expr::BinOp { op: BinOp::And, left: Box::new(rel1), right: Box::new(rel2) };
+
+            Expr::Forall {
+                binders,
+                body: Box::new(Expr::BinOp {
+                    op: BinOp::Implies,
+                    left: Box::new(condition),
+                    right: Box::new(Expr::BoolConst(false)),
+                })
+            }
+        }
     }
 }
