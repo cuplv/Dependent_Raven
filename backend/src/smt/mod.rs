@@ -4,8 +4,10 @@ pub mod builder;
 
 use std::env;
 use std::fs;
+use std::collections::HashMap;
 
-use frontend::ast::{Program, Type, BaseType, Expr, UnOp};
+use frontend::ast::{Program, Type, BaseType, Expr, UnOp, Pattern, BinOp, Ident};
+use frontend::typechecking::pattern_to_expr;
 use crate::anf::{transform_expr as anf_transform, NameGenerator};
 use crate::nnf::{transform_expr as nnf_transform};
 use crate::relabs::{transform_expr as relabs_transform};
@@ -13,6 +15,24 @@ use crate::epr_check::{check_for_cycles, render_cycle};
 use crate::smt::solver::SolverConfig;
 use crate::smt::builder::{expr_to_smt, render_sort, sanitize_id};
 use crate::smt::axioms::{functionality_axiom, injectivity_axiom, disjointness_axiom};
+
+/// Extracts variables inside a pattern to create binders for the Forall quantifier.
+/// This is used when creating axioms for pattern matching branches in recursive functions.
+fn extract_pat_binders(pat: &Pattern, ty: &BaseType, binders: &mut Vec<(String, BaseType)>) {
+    match pat {
+        Pattern::Ident(name) => binders.push((name.clone(), ty.clone())),
+        Pattern::Constructor(_, args) => {
+            for arg in args {
+                // For simplicity, we assume arguments of a recursive datatype 
+                // have the same BaseType as the parent. 
+                // In a fully generalized system, we would look up the exact constructor signature.
+                extract_pat_binders(arg, ty, binders);
+            }
+        }
+        Pattern::Wildcard => {}
+        Pattern::Tuple(_) => panic!("Tuple patterns are not yet supported in recursive function axiom generation"),
+    }
+}
 
 /// [KOR] 함수의 시그니처에서 인자 타입 목록과 반환 타입을 추출합니다.
 /// [ENG] Extracts the list of argument types and the return type from a function's signature.
@@ -186,6 +206,44 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
             let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
             ctx.assert(func_ax_smt).unwrap();
+
+// 🌟 [추가된 부분] 재귀 함수인 경우, 본문(Match)을 분해하여 각 브랜치별로 공리(Axiom)를 생성합니다.
+            // By doing this, we expose the semantics of the recursive function to the SMT solver
+            // using the relational abstraction, thus preventing sort cycles and matching loops.
+            if def.is_recursive {
+                if let Some(body_expr) = &def.body {
+                    // Extract the names and base types of all formal parameters of the function.
+                    let mut params = Vec::new();
+                    let mut curr_ty = &def.signature;
+                    while let Type::Arrow(f) = curr_ty {
+                        let base_ty = match &*f.param_type {
+                            Type::Base(b) | Type::Refined(frontend::ast::RefinedType { base: b, .. }) => b.clone(),
+                            _ => panic!("Complex param types not supported in backend"),
+                        };
+                        params.push((f.param_name.clone(), base_ty));
+                        curr_ty = &*f.ret_type;
+                    }
+
+                    // Initialize the arguments map with the identity mapping (x -> Var(x))
+                    let mut initial_args_map = HashMap::new();
+                    let mut initial_binders = Vec::new();
+                    for (p_name, p_ty) in &params {
+                        initial_args_map.insert(p_name.clone(), Expr::Var(p_name.clone()));
+                        initial_binders.push((p_name.clone(), p_ty.clone()));
+                    }
+
+                    // Recursively flatten nested matches and generate axioms
+                    generate_axioms_from_body(
+                        body_expr,
+                        &initial_args_map,
+                        &initial_binders,
+                        &func_name,
+                        &params,
+                        &mut ctx,
+                        &program,
+                    );
+                }
+            }
         }
 
         // 3.4. 최종 검증 (Assert negated goal and check-sat)
@@ -215,4 +273,106 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     }
     
     Ok(())
+}
+
+/// Recursively traverses a function body to flatten nested `Match` expressions.
+/// When a leaf expression (no top-level `Match`) is reached, it constructs an equality axiom
+/// and passes it through the standard transformation pipeline (ANF -> NNF -> RelAbs) to be asserted in the SMT context.
+fn generate_axioms_from_body(
+    expr: &Expr,
+    args_map: &HashMap<Ident, Expr>,
+    binders: &Vec<(Ident, BaseType)>,
+    func_name: &str,
+    params: &[(Ident, BaseType)],
+    ctx: &mut easy_smt::Context,
+    program: &Program,
+) {
+    if let Expr::Match { expr: match_target, arms } = expr {
+        // We assume the match target is a simple variable in this backend axiom generation phase.
+        let matched_var = match &**match_target {
+            Expr::Var(v) => v.clone(),
+            _ => panic!("Match target must be a simple variable for backend axiom generation"),
+        };
+
+        for (pat, arm_expr) in arms {
+            let mut new_args_map = args_map.clone();
+            let mut new_binders = binders.clone();
+
+            // Convert the pattern to an expression (e.g., `Constructor("Nat::S", [Var("x_min")])`)
+            let pat_expr = pattern_to_expr(pat);
+
+            // Determine the base type of the matched variable to correctly type the new binders
+            // In a fully generalized system, we would look up the specific constructor's signature,
+            // but for simplicity, we assume recursive arguments have the same type as the parent.
+            let matched_ty = binders.iter().find(|(n, _)| n == &matched_var).unwrap().1.clone();
+            
+            // Extract any new variables introduced inside the pattern and add them to the universal binders
+            extract_pat_binders(pat, &matched_ty, &mut new_binders);
+
+            // Remove the original matched variable from the binders, as it is now instantiated
+            new_binders.retain(|(n, _)| n != &matched_var);
+
+            // Update the arguments map: substitute the matched variable with the pattern expression
+            new_args_map.insert(matched_var.clone(), pat_expr.clone());
+
+            // CRUCIAL: Substitute occurrences of the matched variable with the pattern expression 
+            // inside the arm's body. If the body uses `x` and `x` was matched against `Nat::S(x_min)`,
+            // `x` in the body must be replaced by `Nat::S(x_min)` so no unbound variables remain.
+            let substituted_body = frontend::env::substitute_expr(arm_expr, &matched_var, &pat_expr);
+
+            // Recursively process the substituted body of this arm
+            generate_axioms_from_body(
+                &substituted_body,
+                &new_args_map,
+                &new_binders,
+                func_name,
+                params,
+                ctx,
+                program,
+            );
+        }
+    } else {
+        // We have reached a leaf expression (no top-level `Match`).
+        // Construct the Left-Hand Side (LHS) of the equation using the original parameter order
+        // and the accumulated instantiations in `args_map`.
+        let mut lhs_args = Vec::new();
+        for (p_name, _) in params {
+            lhs_args.push(args_map.get(p_name).unwrap().clone());
+        }
+
+        let lhs = Expr::Call {
+            func: func_name.to_string(),
+            args: lhs_args,
+        };
+
+        // Form the equation: LHS == RHS (where RHS is the leaf expression)
+        let eq_expr = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(lhs),
+            right: Box::new(expr.clone()),
+        };
+
+        // Wrap the equation in a Forall quantifier over all accumulated active binders.
+        let axiom = if binders.is_empty() {
+            eq_expr
+        } else {
+            Expr::Forall {
+                binders: binders.clone(),
+                body: Box::new(eq_expr),
+            }
+        };
+
+        // Pass this raw axiom through the standard transformation pipeline
+        // (ANF -> NNF -> RelAbs) just like the main verification goal.
+        // This flattens nested calls into `Let` bindings, pushes negations, and finally 
+        // transforms them into relational logic (Implies), entirely avoiding sort cycles.
+        let mut gen = NameGenerator::new();
+        let anf_expr = anf_transform(&axiom, &mut gen);
+        let nnf_expr = nnf_transform(anf_expr);
+        let relabs_expr = relabs_transform(&nnf_expr, &program.functions);
+
+        // Convert the fully processed relation expression to SMT-LIB2 format and assert it.
+        let smt_expr = expr_to_smt(ctx, &relabs_expr).unwrap();
+        ctx.assert(smt_expr).unwrap();
+    }
 }

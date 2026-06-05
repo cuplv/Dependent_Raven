@@ -242,7 +242,13 @@ fn transform_call_to_rel(
     global_specs: &HashMap<Ident, FunctionDef>,
 ) -> Expr {
     // 1. 관계식 적용 노드 생성: 인자 목록의 맨 마지막에 반환값을 받을 변수를 추가
-    let mut rel_args = args.to_vec();
+    // let mut rel_args = args.to_vec();
+    let mut rel_args = Vec::new();
+    for arg in args {
+        // 인자들에 대해서도 재귀적으로 relabs를 적용하여
+        // 텅 빈 Constructor(예: Nat::Z)가 상수 Var(Nat__Z)로 잘 변환되게 합니다.
+        rel_args.push(relabs(arg, is_pos, global_specs));
+    }
     rel_args.push(Expr::Var(var_name.clone()));
 
     // [KOR] 원래의 함수명과 SMT 상의 관계식(Predicate)을 명확히 구분하기 위해 `_rel` 접미사를 붙입니다.
