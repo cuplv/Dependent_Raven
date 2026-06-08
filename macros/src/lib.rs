@@ -184,8 +184,15 @@ pub fn module(_attrs: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
-    // 원래 모듈(#module)과 테스트 모듈(#test_mod)을 나란히 배치
+    // 원래 모듈(#module)과 테스트 모듈(#test_mod)을 나란히 배치.
+    // [ENG] Inject a dummy `instantiate!` declarative macro at the top of the module
+    // so the Rust compiler resolves the macro without errors before our attribute macro
+    // processes the source AST.
     quote! {
+        macro_rules! instantiate {
+            ($($tt:tt)*) => {};
+        }
+
         #module
         #test_mod
     }.into()
