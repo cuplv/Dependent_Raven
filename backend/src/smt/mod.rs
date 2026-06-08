@@ -67,25 +67,38 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         let _ = fs::create_dir_all("logs");
     }
     
-    let mut relabs_goals = Vec::new();
+    struct ProcessedGoal {
+        name: Ident,
+        skolem_vars: Vec<(Ident, BaseType)>,
+        relabs_expr: Expr,
+        instantiations: Vec<Expr>,
+    }
+
+    let mut processed_goals = Vec::new();
     for goal in &program.goals {
-        // [증명을 위한 핵심]: 목표 명제가 '항상 참'인지 증명하기 위해, 
-        // 목표 명제의 '부정(Not)'이 '만족 불가능(Unsat)'인지 솔버에게 묻습니다.
         let negated_goal = Expr::UnOp {
             op: UnOp::Not,
             expr: Box::new(goal.property.clone()),
         };
 
-        // 1. ANF 변환 수행
         let mut gen = NameGenerator::new();
         let anf_expr = anf_transform(&negated_goal, &mut gen);
-        
-        // 2. NNF 변환 수행
         let nnf_expr = nnf_transform(anf_expr.clone());
         
-        // 3. Relational Abstraction 수행
-        let relabs_expr = relabs_transform(&nnf_expr, &program.functions);
+        // [KOR] Skolemize: 최상단 Exists 변수들을 뽑아내어 전역 상수(declare-const)로 만듭니다.
+        let (skolem_vars, skolem_body) = crate::skolemize::skolemize_expr(&nnf_expr);
+
+        let relabs_expr = relabs_transform(&skolem_body, &program.functions);
         
+        let mut relabs_insts = Vec::new();
+        for inst in &goal.instantiations {
+            let inst_expr = Expr::Instantiate(Box::new(inst.clone()));
+            let anf_inst = anf_transform(&inst_expr, &mut gen);
+            let nnf_inst = nnf_transform(anf_inst);
+            let relabs_inst = relabs_transform(&nnf_inst, &program.functions);
+            relabs_insts.push(relabs_inst);
+        }
+
         if dump_ir {
             let write_log = |step: &str, content: String| {
                 let filename = format!("logs/{}_{}.log", goal.name, step);
@@ -101,11 +114,16 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             
             println!("  💾 Saved IR logs to `logs/{}_*.log`", goal.name);
         }
-        relabs_goals.push((goal.name.clone(), relabs_expr));
+        processed_goals.push(ProcessedGoal {
+            name: goal.name.clone(),
+            skolem_vars,
+            relabs_expr,
+            instantiations: relabs_insts,
+        });
     }
 
     // 2. EPR 프래그먼트 검사 (Sort Cycle Check) - RelAbs 이후에 수행!
-    let goals_for_check: Vec<_> = relabs_goals.iter().map(|(_, expr)| expr.clone()).collect();
+    let goals_for_check: Vec<_> = processed_goals.iter().map(|g| g.relabs_expr.clone()).collect();
     if let Err(cycles) = check_for_cycles(&goals_for_check, &program.functions) {
         let mut err_msg = String::from("Found Sort Cycles! This breaks decidability.\n");
         for c in cycles {
@@ -122,7 +140,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     // 로그 폴더가 없으면 미리 생성합니다.
     let _ = fs::create_dir_all("logs");
     
-    for (goal_name, relabs_expr) in relabs_goals {
+    for goal in processed_goals {
+        let goal_name = goal.name;
         println!(" Solving Goal: {}", goal_name);
 
         // 무조건 .smt2 파일에 로그를 남기도록 설정합니다.
@@ -246,9 +265,21 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             }
         }
 
-        // 3.4. 최종 검증 (Assert negated goal and check-sat)
-        let goal_smt = expr_to_smt(&mut ctx, &relabs_expr).unwrap();
-        println!("Goal SMT: {}", ctx.display(goal_smt));
+        // 3.4. Skolem Variables 및 Instantiations 추가
+        // [KOR] Phase 2에서 뽑아낸 전역 상수(Skolem variables)들을 선언합니다.
+        for (var_name, var_type) in &goal.skolem_vars {
+            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type))).unwrap();
+        }
+
+        // [KOR] Phase 3에서 변환한 인스턴스화 공리들을 각각 별도의 assert(exists ...) 구문으로 꽂아 넣습니다.
+        for inst_expr in &goal.instantiations {
+            let inst_smt = expr_to_smt(&mut ctx, inst_expr).unwrap();
+            ctx.assert(inst_smt).unwrap();
+        }
+
+        // 3.5. 최종 검증 (Assert negated goal and check-sat)
+        let goal_smt = expr_to_smt(&mut ctx, &goal.relabs_expr).unwrap();
+        // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
         ctx.assert(goal_smt).unwrap();
         
         match ctx.check().unwrap() {

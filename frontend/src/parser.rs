@@ -355,15 +355,10 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
         SynExpr::If(i) => {
             let cond = Box::new(convert_expr(&i.cond));
             
-            // `then` 브랜치: Block을 Expr로 변환
-            let then_expr = Box::new(
-                i.then_branch.stmts.last()
-                .map(|stmt| match stmt {
-                    syn::Stmt::Expr(e, _) => convert_expr(e),
-                    _ => Expr::Tuple(vec![])
-                })
-                .unwrap_or_else(|| Expr::Tuple(vec![]))
-            );
+            // [KOR] `then` 브랜치: Block 전체를 Expr로 변환하도록 수정하여 내부의 instantiate!를 보존합니다.
+            // [ENG] Convert the entire `then` block to Expr to preserve internal instantiate! macros.
+            let then_block_expr = SynExpr::Block(syn::ExprBlock { attrs: vec![], label: None, block: i.then_branch.clone() });
+            let then_expr = Box::new(convert_expr(&then_block_expr));
 
             // `else` 브랜치 파싱
             let else_expr = Box::new(if let Some((_, else_branch)) = &i.else_branch {
@@ -393,17 +388,82 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
         }
         SynExpr::Paren(p) => convert_expr(&p.expr),
         SynExpr::Block(b) => {
-            b.block.stmts.last()
-                .map(|stmt| match stmt {
-                    syn::Stmt::Expr(e, _) => convert_expr(e),
-                    _ => Expr::Tuple(vec![])
-                })
-                .unwrap_or_else(|| Expr::Tuple(vec![]))
+            let mut current_expr = Expr::Tuple(vec![]);
+            
+            // [KOR] 블록 내의 구문들을 역순으로 순회하며, 마지막 구문은 반환값으로, 
+            //       이전 구문들 중 instantiate! 매크로는 Let 바인딩으로 엮어줍니다.
+            // [ENG] Iterate statements in reverse. The last statement is the return value,
+            //       and preceding instantiate! macros are chained as Let bindings.
+            for (i, stmt) in b.block.stmts.iter().rev().enumerate() {
+                if i == 0 {
+                    // 블록의 가장 마지막 구문 (반환값)
+                    match stmt {
+                        syn::Stmt::Expr(e, None) => {
+                            current_expr = convert_expr(e);
+                        }
+                        syn::Stmt::Expr(e, Some(_)) => {
+                            // 세미콜론으로 끝나는 경우에도 값을 취함 (Instantiate 등)
+                            let expr = convert_expr(e);
+                            if let Expr::Instantiate(_) = expr {
+                                current_expr = Expr::Let {
+                                    pat: Pattern::Wildcard,
+                                    bound_expr: Box::new(expr),
+                                    body: Box::new(Expr::Tuple(vec![])),
+                                };
+                            } else {
+                                current_expr = expr;
+                            }
+                        }
+                        syn::Stmt::Macro(m) => {
+                            let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
+                            if mac_name == "instantiate" {
+                                if let Ok(inner) = syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
+                                    current_expr = Expr::Let {
+                                        pat: Pattern::Wildcard,
+                                        bound_expr: Box::new(Expr::Instantiate(Box::new(convert_expr(&inner)))),
+                                        body: Box::new(Expr::Tuple(vec![])),
+                                    };
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // 블록 중간에 위치한 구문들 (instantiate! 만 처리)
+                    let converted = match stmt {
+                        syn::Stmt::Expr(e, _) => Some(convert_expr(e)),
+                        syn::Stmt::Macro(m) => {
+                            let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
+                            if mac_name == "instantiate" {
+                                if let Ok(inner) = syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
+                                    Some(Expr::Instantiate(Box::new(convert_expr(&inner))))
+                                } else { None }
+                            } else { None }
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(Expr::Instantiate(inner)) = converted {
+                        current_expr = Expr::Let {
+                            pat: Pattern::Wildcard,
+                            bound_expr: Box::new(Expr::Instantiate(inner)),
+                            body: Box::new(current_expr),
+                        };
+                    }
+                }
+            }
+            current_expr
         }
         SynExpr::Macro(m) => {
-            let quantifier_name = m.mac.path.segments.last().unwrap().ident.to_string();
+            let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
             
-            if quantifier_name == "forall" || quantifier_name == "exists" {
+            if mac_name == "instantiate" {
+                if let Ok(inner_expr) = syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
+                    return Expr::Instantiate(Box::new(convert_expr(&inner_expr)));
+                }
+            }
+            
+            if mac_name == "forall" || mac_name == "exists" {
                 if let Ok(closure) = syn::parse2::<syn::ExprClosure>(m.mac.tokens.clone()) {
                     let mut binders = Vec::new();
                     for arg in closure.inputs {
@@ -414,14 +474,14 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                         }
                     }
                     let body = Box::new(convert_expr(&closure.body));
-                    return if quantifier_name == "forall" {
+                    return if mac_name == "forall" {
                         Expr::Forall { binders, body }
                     } else {
                         Expr::Exists { binders, body }
                     };
                 }
             }
-            Expr::Var(format!("unsupported_macro_{}", quantifier_name))
+            Expr::Var(format!("unsupported_macro_{}", mac_name))
         }
         _ => Expr::Var("unsupported_expression".to_string()),
     }

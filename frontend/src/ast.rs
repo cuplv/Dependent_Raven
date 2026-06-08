@@ -246,6 +246,19 @@ pub enum Expr {
         binders: Vec<(Ident, BaseType)>,
         body: Box<Expr>,
     },
+
+    /// 수동 인스턴스화 (Manual Instantiation)
+    /// [KOR] CEGQI 논문의 핵심. 특정 항(Ground Term)에 대한 로컬 전체성(Totality) 공리를 주입하기 위해 사용됩니다.
+    ///       논리적으로는 True와 같지만, 백엔드의 ANF/RelAbs 파이프라인을 거치며 `exists r. f_rel(args, r)` 형태로 번역됩니다.
+    /// [ENG] Core of the CEGQI paper. Used to inject a local totality axiom for a specific ground term.
+    ///       Logically equivalent to True, but translates to `exists r. f_rel(args, r)` through the ANF/RelAbs pipeline.
+    Instantiate(Box<Expr>),
+
+    /// [KOR] Instantiate 노드가 ANF 평탄화를 거친 후의 모습입니다.
+    ///       RelAbs 단계에서 무조건 Exists와 And 논리로 번역됩니다.
+    /// [ENG] The ANF-flattened form of an Instantiate node.
+    ///       Strictly translated into Exists and And logic during RelAbs.
+    ExistentialBindings(Vec<(Ident, Expr)>),
 }
 
 // ==========================================
@@ -298,5 +311,10 @@ pub struct Goal {
     /// 명제(정리)의 이름 / Name of the theorem/property
     pub name: Ident,
     /// 프론트엔드가 생성한 (그리고 백엔드가 가공할) 최종 논리식 / The final logical expression to be proven
-    pub property: Expr,        
+    pub property: Expr,
+    
+    /// [ENG] Global instantiations explicitly provided by the user via `instantiate!(...)`.
+    ///       These are extracted and collected during type checking, completely separate 
+    ///       from the main VC to prevent code bloat and ensure they act as top-level axioms.
+    pub instantiations: Vec<Expr>,
 }

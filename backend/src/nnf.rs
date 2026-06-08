@@ -200,6 +200,18 @@ fn nnf(expr: Expr, is_negated: bool) -> Expr {
         }
 
         Expr::Tuple(elems) => Expr::Tuple(elems), // 보통 NNF에서 튜플은 논리식이 아니므로 그대로 둠
+        
+        Expr::Instantiate(_) => panic!("Instantiate should be eliminated by ANF"),
+        
+        Expr::ExistentialBindings(bindings) => {
+            // [KOR] 내부 바인딩 수식들은 무조건 긍정(Positive) 극성으로 NNF를 통과해야 합니다.
+            // [ENG] Inner binding expressions must pass through NNF with positive polarity.
+            let new_bindings = bindings.into_iter()
+                .map(|(id, e)| (id, nnf(e, false)))
+                .collect();
+            Expr::ExistentialBindings(new_bindings)
+        }
+
         Expr::Match { .. } => panic!("Match should be eliminated by Eval before NNF"),
     }
 }

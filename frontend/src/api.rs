@@ -187,6 +187,7 @@ pub fn register_val(program: &mut Program, fn_name: &str, sig_str: Option<&str>,
             program.goals.push(Goal {
                 name: fn_name.to_string(),
                 property: combined_vc,
+                instantiations: env.instantiations.clone(),
             });
         }
     }

@@ -2,7 +2,7 @@
 //! F* 스타일의 Dependent Type Checking을 위한 타입 환경(Type Environment, Γ)
 
 use std::collections::HashMap;
-use crate::ast::{Ident, Type, Expr, BinOp, UnOp, RefinedType};
+use crate::ast::{Ident, Type, Expr, BinOp};
 
 /// 하나의 스코프(블록) 내에서 선언된 변수들과 경로 조건들을 담습니다.
 #[derive(Debug, Clone)]
@@ -27,6 +27,9 @@ impl Default for Scope {
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     scopes: Vec<Scope>,
+    /// [ENG] Global instantiations explicitly provided by the user.
+    ///       Collected during type checking to be exported at the top-level.
+    pub instantiations: Vec<Expr>,
 }
 
 impl TypeEnv {
@@ -34,6 +37,7 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             scopes: vec![Scope::default()],
+            instantiations: Vec::new(),
         }
     }
 
@@ -316,6 +320,15 @@ pub fn substitute_expr(expr: &Expr, target_var: &Ident, replacement: &Expr) -> E
                 binders: binders.clone(),
                 body: new_body,
             }
+        },
+        Expr::Instantiate(inner) => {
+            Expr::Instantiate(Box::new(substitute_expr(inner, target_var, replacement)))
+        },
+        Expr::ExistentialBindings(bindings) => {
+            let new_bindings = bindings.iter().map(|(id, e)| {
+                (id.clone(), substitute_expr(e, target_var, replacement))
+            }).collect();
+            Expr::ExistentialBindings(new_bindings)
         },
     }
 }

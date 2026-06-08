@@ -164,6 +164,17 @@ fn build_sort_graph<'a>(
             }
         }
 
+        // 수동 인스턴스화 노드는 CEGQI 논문에 의해 Sort Cycle을 유발하지 않으므로,
+        // 단순하게 내부 수식만 순회하거나 통과시킵니다.
+        Expr::Instantiate(inner) => {
+            build_sort_graph(inner, graph, active_foralls);
+        }
+        Expr::ExistentialBindings(bindings) => {
+            for (_, e) in bindings {
+                build_sort_graph(e, graph, active_foralls);
+            }
+        }
+
         // 리프 노드는 무시
         Expr::BoolConst(_) | Expr::Var(_) => {}
     }

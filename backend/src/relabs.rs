@@ -178,14 +178,85 @@ fn relabs(expr: &Expr, is_pos: bool, global_specs: &HashMap<Ident, FunctionDef>)
         }
 
         // --------------------------------------------------------------------
-        // 5. 리프 노드 (Leaf Nodes) - 수정 없이 통과
+        // 5. 수동 인스턴스화 (ExistentialBindings)
         // --------------------------------------------------------------------
-        Expr::BoolConst(_) | Expr::Var(_) | Expr::Tuple(_) | Expr::ApplyRel { .. } => {
+        Expr::ExistentialBindings(bindings) => {
+            // [KOR] 사용자가 강제한 인스턴스화이므로, 극성(is_pos)에 상관없이 무조건 Exists와 And로 결합합니다.
+            // [ENG] Since this is a manual instantiation forced by the user, we unconditionally bind them
+            //       with Exists and And, ignoring the current polarity (is_pos).
+            let mut current_expr = Expr::BoolConst(true);
+            
+            // 바인딩을 역순으로 순회하며 Exists와 And로 감쌉니다.
+            for (var_name, bound_expr) in bindings.iter().rev() {
+                match bound_expr {
+                    Expr::Call { func, args } | Expr::Constructor { name: func, args } => {
+                        if args.is_empty() && matches!(bound_expr, Expr::Constructor { .. }) {
+                            // 인자가 없는 생성자는 관계식이 아니므로 무시합니다.
+                            continue;
+                        }
+                        
+                        let ret_base_type = get_return_base_type(func, global_specs);
+                        let binders = vec![(var_name.clone(), ret_base_type)];
+                        
+                        let mut rel_args = Vec::new();
+                        for arg in args {
+                            rel_args.push(relabs(arg, is_pos, global_specs));
+                        }
+                        rel_args.push(Expr::Var(var_name.clone()));
+                        
+                        let apply_rel = Expr::ApplyRel {
+                            relation: format!("{}_rel", func),
+                            args: rel_args,
+                        };
+                        
+                        current_expr = Expr::Exists {
+                            binders,
+                            body: Box::new(Expr::BinOp {
+                                op: BinOp::And,
+                                left: Box::new(apply_rel),
+                                right: Box::new(current_expr),
+                            }),
+                        };
+                    }
+                    Expr::ApplyRel { relation, args } => {
+                        let ret_base_type = get_return_base_type(relation, global_specs);
+                        let binders = vec![(var_name.clone(), ret_base_type)];
+                        
+                        let mut rel_args = Vec::new();
+                        for arg in args {
+                            rel_args.push(relabs(arg, is_pos, global_specs));
+                        }
+                        rel_args.push(Expr::Var(var_name.clone()));
+                        
+                        let apply_rel = Expr::ApplyRel {
+                            relation: relation.clone(),
+                            args: rel_args,
+                        };
+                        
+                        current_expr = Expr::Exists {
+                            binders,
+                            body: Box::new(Expr::BinOp {
+                                op: BinOp::And,
+                                left: Box::new(apply_rel),
+                                right: Box::new(current_expr),
+                            }),
+                        };
+                    }
+                    _ => unreachable!("Only Call, Constructor, and ApplyRel can be existential bindings"),
+                }
+            }
+            current_expr
+        }
+
+        // --------------------------------------------------------------------
+        // 6. 리프 노드 (Leaf Nodes) - 수정 없이 통과
+        // --------------------------------------------------------------------
+        Expr::BoolConst(_) | Expr::Var(_) | Expr::Tuple(_) | Expr::ApplyRel { .. } | Expr::Instantiate(_) => {
             expr.clone()
         }
 
         // --------------------------------------------------------------------
-        // 6. 에러 케이스 (Error Cases)
+        // 7. 에러 케이스 (Error Cases)
         // --------------------------------------------------------------------
         Expr::Constructor { name, args } if args.is_empty() => {
             // 인자가 없는 생성자는 상수로 취급되어 ANF에서 Let으로 감싸지 않고 맨몸으로 넘어옵니다.

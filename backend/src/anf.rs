@@ -64,26 +64,43 @@ fn flatten(expr: &Expr, gen: &mut NameGenerator) -> AnfResult {
         }
 
         // 3. 단항 연산자
-        Expr::UnOp { op, expr: inner } => {
-            let (bindings, core) = flatten(inner, gen);
-            (bindings, Expr::UnOp {
-                op: op.clone(),
-                expr: Box::new(core),
+        Expr::UnOp { op: UnOp::Not, expr: inner } => {
+            // [KOR] 논리 부정은 불리언(Boolean) 수준의 연산이므로 내부 바인딩을 위로 끌어올리지 않고 지역적으로 묶습니다.
+            //       이를 통해 불필요한 양화사 스코프 확장에 의한 Sort Cycle을 방지합니다.
+            let flat_inner = transform_expr(inner, gen);
+            (vec![], Expr::UnOp {
+                op: UnOp::Not,
+                expr: Box::new(flat_inner),
             })
         }
 
-        // 4. 이항 연산자 (동치/논리 연산은 함수 호출이 아니므로 평탄화 대상이 아님. 내부만 평탄화)
+        // 4. 이항 연산자
         Expr::BinOp { op, left, right } => {
-            let (mut l_bindings, l_core) = flatten(left, gen);
-            let (mut r_bindings, r_core) = flatten(right, gen);
-            
-            l_bindings.append(&mut r_bindings);
-            
-            (l_bindings, Expr::BinOp {
-                op: op.clone(),
-                left: Box::new(l_core),
-                right: Box::new(r_core),
-            })
+            match op {
+                // [KOR] 동치 연산자(Eq, Neq)는 값을 비교하므로, 양화사(Forall/Exists)가 비교 연산 안으로 들어가면
+                //       SMT 문법 에러가 발생합니다. 따라서 반드시 바인딩을 연산자 위로 끌어올려야 합니다.
+                BinOp::Eq | BinOp::Neq => {
+                    let (mut l_bindings, l_core) = flatten(left, gen);
+                    let (mut r_bindings, r_core) = flatten(right, gen);
+                    l_bindings.append(&mut r_bindings);
+                    (l_bindings, Expr::BinOp {
+                        op: op.clone(),
+                        left: Box::new(l_core),
+                        right: Box::new(r_core),
+                    })
+                }
+                // [KOR] 논리 연산자(And, Or, Implies)는 불리언(Boolean) 연산이므로 양화사를 포함할 수 있습니다.
+                //       바인딩을 끌어올리지 않고 지역적으로 묶어 양화사 스코프를 최소화합니다. (Sort Cycle 방지)
+                _ => {
+                    let flat_left = transform_expr(left, gen);
+                    let flat_right = transform_expr(right, gen);
+                    (vec![], Expr::BinOp {
+                        op: op.clone(),
+                        left: Box::new(flat_left),
+                        right: Box::new(flat_right),
+                    })
+                }
+            }
         }
 
         // 5. 🌟 핵심: 일반 함수 호출 (Call) 🌟
@@ -192,6 +209,22 @@ fn flatten(expr: &Expr, gen: &mut NameGenerator) -> AnfResult {
                 binders: binders.clone(),
                 body: Box::new(flat_body),
             })
+        }
+
+        // 10. 수동 인스턴스화 (Manual Instantiation)
+        Expr::Instantiate(inner) => {
+            // [KOR] 내부 수식을 평탄화하여 함수 호출 바인딩들(bindings)을 끄집어냅니다.
+            //       기존의 Let 체인(Forall 긍정 극성)과 달리, 이 바인딩들은 반드시 존재해야 하는(Exists)
+            //       강제 공리로 사용되므로 특수한 ExistentialBindings 노드로 감싸서 반환합니다.
+            // [ENG] Flatten the inner expression to extract function call bindings.
+            //       Unlike normal Let chains (which become Forall), these bindings MUST exist (Exists),
+            //       so we wrap them in a special ExistentialBindings node.
+            let (bindings, _core) = flatten(inner, gen);
+            (vec![], Expr::ExistentialBindings(bindings))
+        }
+
+        Expr::ExistentialBindings(_) => {
+            unreachable!("ExistentialBindings should not exist before ANF")
         }
 
         // Match와 ApplyRel은 보통 이 단계 이전에 없거나, Eval에서 정리된다고 가정

@@ -256,7 +256,24 @@ pub fn synthesize_expr(
             }
         }
 
-        Expr::BinOp { .. } | Expr::UnOp { .. } | Expr::Forall { .. } | Expr::Exists { .. } | Expr::ApplyRel { .. } => {
+        // [T-INSTANTIATE]: 수동 인스턴스화 (Manual Instantiation for CEGQI)
+        Expr::Instantiate(inner) => {
+            // [KOR] 1. 내부 수식(Ground Term)을 정상적으로 타입 체킹하여 유효성을 검사합니다.
+            // [ENG] 1. Synthesize the inner ground term to ensure it is well-typed.
+            let _ = synthesize_expr(env, inner, global_specs, vcs);
+            
+            // [KOR] 2. CEGQI 논문에 따라, 인스턴스화 공리를 지역 변수에 묶어두지 않고
+            //          전역(Global) 리스트에 따로 모아둡니다.
+            // [ENG] 2. Following CEGQI, we collect instantiation axioms into a global list
+            //          instead of binding them to the local path condition.
+            env.instantiations.push(*inner.clone());
+            
+            // [KOR] 3. 이 구문 자체는 값에 영향을 주지 않으므로 Unit 타입을 반환합니다.
+            // [ENG] 3. Return Unit type as it acts purely as a logical hint for the backend.
+            Type::Base(BaseType::Unit)
+        }
+
+        Expr::BinOp { .. } | Expr::UnOp { .. } | Expr::Forall { .. } | Expr::Exists { .. } | Expr::ApplyRel { .. } | Expr::ExistentialBindings(_) => {
             unimplemented!("T-LOGIC not implemented")
         }
     }
@@ -280,6 +297,21 @@ pub fn check_expr(
     vcs: &mut Vec<Expr>,
 ) {
     match expr {
+        // ---------------------------------------------------------
+        // [T-LET]: Let 바인딩 (Checking Mode)
+        // ---------------------------------------------------------
+        // [KOR] 블록 안에 instantiate! 나 다른 let 구문이 섞여 있을 때,
+        //       마지막 구문이 Match라면 Checking Mode를 그대로 유지하며 내려보내야 합니다.
+        // [ENG] When a block contains `instantiate!` or other `let` bindings,
+        //       we must propagate the Expected type down to the body so that `Match` can use it.
+        Expr::Let { pat, bound_expr, body } => {
+            let bound_type = synthesize_expr(env, bound_expr, global_specs, vcs);
+            env.with_scope(|inner_env| {
+                bind_pattern_vars(inner_env, pat, &bound_type);
+                check_expr(inner_env, body, expected, global_specs, vcs);
+            });
+        }
+
         // ---------------------------------------------------------
         // [T-MATCH]: 패턴 매칭 (Catalyst Checking Rule)
         // ---------------------------------------------------------

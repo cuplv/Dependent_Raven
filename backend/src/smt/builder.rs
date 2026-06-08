@@ -106,5 +106,8 @@ pub fn expr_to_smt(ctx: &mut Context, expr: &Expr) -> std::io::Result<SExpr> {
         Expr::Match { .. } | Expr::Tuple(_) => {
             panic!("Match and Tuple expressions are not supported in SMT backend");
         }
+        Expr::Instantiate(_) | Expr::ExistentialBindings(_) => {
+            panic!("Instantiate and ExistentialBindings should have been eliminated by RelAbs phase");
+        }
     }
 }
