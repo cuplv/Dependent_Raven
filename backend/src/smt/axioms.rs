@@ -3,7 +3,7 @@
 //! 생성자(Constructor)와 함수(Function)가 수학적으로 올바르게 동작하도록
 //! 함수성(Functionality), 단사성(Injectivity), 분리성(Disjointness) 공리를 Expr 형태로 생성합니다.
 
-use frontend::ast::{Expr, BinOp, UnOp, BaseType, FunctionDef, Ident};
+use frontend::ast::{Expr, BinOp, BaseType, Ident};
 
 /// [KOR] 관계식에 사용할 고유 변수 이름을 생성하는 헬퍼 함수
 /// [ENG] Helper function to generate unique variable names for relations

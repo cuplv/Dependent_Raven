@@ -9,7 +9,7 @@
 //!       It is a prerequisite for Relational Abstraction (Task 6) to clearly identify 
 //!       whether a function call is in a 'positive' or 'negative' polarity.
 
-use frontend::ast::{Expr, BinOp, UnOp, Ident, BaseType};
+use frontend::ast::{Expr, BinOp, UnOp, Ident};
 
 /// [KOR] 수식을 NNF로 변환합니다.
 /// [ENG] Transforms an expression into Negation Normal Form.

@@ -1,4 +1,4 @@
-use crate::ast::{Program, FunctionDef, Goal, Type, Expr, Ident, BaseType, BinOp};
+use crate::ast::{Program, FunctionDef, Goal, Type, Expr, BaseType, BinOp};
 use crate::parser::{SpecSignature, convert_signature, convert_expr};
 use syn::{ItemFn, ItemEnum, Type as SynType, PathArguments, GenericArgument};
 

@@ -2,7 +2,7 @@
 //! AST(Expr)를 easy_smt::SExpr로 변환하는 변환기
 
 use easy_smt::{Context, SExpr};
-use frontend::ast::{Expr, BinOp, UnOp, BaseType, Ident};
+use frontend::ast::{Expr, BinOp, UnOp, BaseType};
 
 /// [KOR] 식별자에 들어있는 `::`를 SMT-LIB2가 파싱할 수 있는 안전한 `__`로 치환합니다.
 pub fn sanitize_id(id: &str) -> String {

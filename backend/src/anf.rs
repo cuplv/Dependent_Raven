@@ -8,7 +8,7 @@
 //! [ENG] Flattens nested function calls so they can be easily replaced
 //!       with pure relations for the SMT solver.
 
-use frontend::ast::{Expr, Ident, Pattern, BinOp, UnOp, BaseType};
+use frontend::ast::{Expr, Ident, Pattern, BinOp, UnOp};
 
 /// 고유한 임시 변수 이름을 생성하기 위한 상태 저장소
 pub struct NameGenerator {
