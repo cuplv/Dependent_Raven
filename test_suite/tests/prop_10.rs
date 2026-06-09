@@ -36,9 +36,9 @@ mod tip_benchmarks {
 
     #[val((m: Nat) -> Lemma(sub(m,m) == Nat::Z))]
     fn tip_ten(m: Nat) {
+        instantiate!(sub(m,m));
         match m {
             Nat::Z => {
-                instantiate!(sub(m,m));
                 ()
             },
             Nat::S(m_prime) => {

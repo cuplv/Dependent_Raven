@@ -305,6 +305,15 @@ pub struct FunctionDef {
     pub is_recursive: bool,    
 }
 
+/// [ENG] A single Verification Condition (VC) combined with its strictly scoped instantiations.
+#[derive(Debug, Clone)]
+pub struct SubGoal {
+    /// [ENG] The actual logical expression to be proven (Context => Target).
+    pub property: Expr,
+    /// [ENG] Instantiations (hints) strictly scoped to this specific VC.
+    pub instantiations: Vec<Expr>,
+}
+
 /// 증명해야 할 목표 명제 (Verification Goal)
 #[derive(Debug, Clone)]
 pub struct Goal {

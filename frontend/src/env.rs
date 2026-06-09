@@ -11,6 +11,8 @@ pub struct Scope {
     pub bindings: HashMap<Ident, Type>,
     /// 현재 스코프에서 참(True)이라고 가정할 수 있는 논리식들 (예: if x > 0 안에서의 x > 0)
     pub path_conditions: Vec<Expr>,
+    /// [ENG] Instantiations manually provided within this specific scope.
+    pub instantiations: Vec<Expr>,
 }
 
 impl Default for Scope {
@@ -18,6 +20,7 @@ impl Default for Scope {
         Self {
             bindings: HashMap::new(),
             path_conditions: Vec::new(),
+            instantiations: Vec::new(),
         }
     }
 }
@@ -27,9 +30,6 @@ impl Default for Scope {
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     scopes: Vec<Scope>,
-    /// [ENG] Global instantiations explicitly provided by the user.
-    ///       Collected during type checking to be exported at the top-level.
-    pub instantiations: Vec<Expr>,
 }
 
 impl TypeEnv {
@@ -37,8 +37,25 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             scopes: vec![Scope::default()],
-            instantiations: Vec::new(),
         }
+    }
+
+    /// [ENG] Injects a manual instantiation hint into the current (most deeply nested) scope.
+    pub fn add_instantiation(&mut self, expr: Expr) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.instantiations.push(expr);
+        }
+    }
+
+    /// [ENG] Collects all instantiations active in the current environment across all scopes.
+    pub fn get_active_instantiations(&self) -> Vec<Expr> {
+        let mut active_insts = Vec::new();
+        for scope in &self.scopes {
+            for inst in &scope.instantiations {
+                active_insts.push(inst.clone());
+            }
+        }
+        active_insts
     }
 
     pub fn close_formula(&self, target: Expr) -> Expr {

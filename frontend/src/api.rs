@@ -172,23 +172,22 @@ pub fn register_val(program: &mut Program, fn_name: &str, sig_str: Option<&str>,
     // }
 
     if !vcs.is_empty() {
-        let mut combined_vc = vcs[0].clone();
-        for vc in &vcs[1..] {
-            combined_vc = Expr::BinOp {
-                op: BinOp::And,
-                left: Box::new(combined_vc),
-                right: Box::new(vc.clone()),
-            };
-        }
-        
         // [KOR] 사용자가 명시적인 타입 시그니처(Lemma 또는 Refinement)를 제공했을 때만 SMT 솔버의 목표(Goal)로 등록합니다.
         //       단순히 `#[val]`만 적힌 일반 함수는 VC가 생성되더라도 (예: Trivial VC) 검증을 생략합니다.
         if sig_str.is_some() {
-            program.goals.push(Goal {
-                name: fn_name.to_string(),
-                property: combined_vc,
-                instantiations: env.instantiations.clone(),
-            });
+            // [KOR] 🌟 VC Splitting (VC 분할 검증)
+            //       거대한 AND 트리로 하나로 묶어 던지면 어디서 에러가 났는지 파악하기 어렵고 솔버가 불안정해집니다.
+            //       수집된 단일 VC들을 각각 독립적인 Goal로 쪼개어 백엔드에 던집니다.
+            // [ENG] VC Splitting: Instead of combining all VCs into a giant AND tree,
+            //       we push each VC as an independent Goal. This makes debugging much easier
+            //       and improves SMT solver stability.
+            for (i, subgoal) in vcs.into_iter().enumerate() {
+                program.goals.push(Goal {
+                    name: format!("{}_vc_{}", fn_name, i + 1),
+                    property: subgoal.property,
+                    instantiations: subgoal.instantiations,
+                });
+            }
         }
     }
 }

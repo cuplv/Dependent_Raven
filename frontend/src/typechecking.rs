@@ -11,7 +11,7 @@ pub fn synthesize_expr(
     env: &mut TypeEnv,
     expr: &Expr,
     global_specs: &HashMap<Ident, FunctionDef>,
-    vcs: &mut Vec<Expr>,
+    vcs: &mut Vec<SubGoal>,
 ) -> Type {
     match expr {
         // [T-CONST]: 상수
@@ -258,17 +258,13 @@ pub fn synthesize_expr(
 
         // [T-INSTANTIATE]: 수동 인스턴스화 (Manual Instantiation for CEGQI)
         Expr::Instantiate(inner) => {
-            // [KOR] 1. 내부 수식(Ground Term)을 정상적으로 타입 체킹하여 유효성을 검사합니다.
             // [ENG] 1. Synthesize the inner ground term to ensure it is well-typed.
             let _ = synthesize_expr(env, inner, global_specs, vcs);
             
-            // [KOR] 2. CEGQI 논문에 따라, 인스턴스화 공리를 지역 변수에 묶어두지 않고
-            //          전역(Global) 리스트에 따로 모아둡니다.
-            // [ENG] 2. Following CEGQI, we collect instantiation axioms into a global list
+            // [ENG] 2. Following CEGQI, we collect instantiation axioms into a scoped list
             //          instead of binding them to the local path condition.
-            env.instantiations.push(*inner.clone());
+            env.add_instantiation(*inner.clone());
             
-            // [KOR] 3. 이 구문 자체는 값에 영향을 주지 않으므로 Unit 타입을 반환합니다.
             // [ENG] 3. Return Unit type as it acts purely as a logical hint for the backend.
             Type::Base(BaseType::Unit)
         }
@@ -294,7 +290,7 @@ pub fn check_expr(
     expr: &Expr,
     expected: &Type,
     global_specs: &HashMap<Ident, FunctionDef>,
-    vcs: &mut Vec<Expr>,
+    vcs: &mut Vec<SubGoal>,
 ) {
     match expr {
         // ---------------------------------------------------------
@@ -373,7 +369,7 @@ pub fn generate_subtyping_vc(
     env: &mut TypeEnv,
     inferred: &Type,
     expected: &Type,
-    vcs: &mut Vec<Expr>
+    vcs: &mut Vec<SubGoal>
 ) {
     match (inferred, expected) {
         // =========================================================================
@@ -431,9 +427,13 @@ pub fn generate_subtyping_vc(
                 // -----------------------------------------------------------------
                 // CONSEQUENCE: \Gamma \vdash \{\nu:B \mid e_1\} <: \{\nu:B \mid e_2\}
                 // -----------------------------------------------------------------
-                // [KOR] 생성된 VC를 vcs 목록에 추가합니다. SMT 솔버가 이 VC가 Valid함을 증명하면 서브타이핑이 성립합니다!
-                // [ENG] Push the generated VC to the vcs list. If the SMT solver proves this VC is Valid, the subtyping holds!
-                vcs.push(vc);
+                // [KOR] 현재 스코프에서 유효한 힌트들을 모아, 최종 VC와 함께 SubGoal로 포장하여 배열에 넣습니다.
+                // [ENG] Collect active instantiations for this specific scope and package them into a SubGoal.
+                let active_insts = inner_env.get_active_instantiations();
+                vcs.push(SubGoal {
+                    property: vc,
+                    instantiations: active_insts,
+                });
             });
         }
 
