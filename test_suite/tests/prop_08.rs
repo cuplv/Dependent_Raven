@@ -1,0 +1,55 @@
+// TIP Benchmark Example
+// A classic example: Proving the commutativity of natural number addition
+// using F* style refinement types and uncurried signatures.
+#[ravencheck::module]
+mod tip_benchmarks {
+
+    // 1. Inductive Datatype Definition for Natural Numbers
+    #[define]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum Nat {
+        Z,
+        S(Box<Nat>),
+    }
+
+    // 2. Addition Function
+    // We declare the signature and its refinement (the behavior of addition).
+    // The macro will extract the signature to generate functionality axioms,
+    // and replace this function with a relational abstraction (add_rel) in the backend.
+    #[val]
+    #[recursive]
+    pub fn add(x: Nat, y: Nat) -> Nat {
+        match x {
+            Nat::Z => y,
+            Nat::S(x_prime) => Nat::S(Box::new(add(*x_prime, y))),
+        }
+    }
+
+    #[val]
+    #[recursive]
+    fn sub(x: Nat, y: Nat) -> Nat {
+        match x.clone() {
+            Nat::Z => Nat::Z,
+            Nat::S(x_min) => match y {
+                Nat::Z => x,
+                Nat::S(y_min) => sub(*x_min, *y_min),
+            }
+        }
+    }
+
+    #[val((i: Nat, j: Nat, k: Nat) -> Lemma(sub(add(i,j), add(i,k)) == sub(j, k)))]
+    fn tip_eight(i: Nat, j: Nat, k: Nat) {
+        instantiate!(sub(add(i,j), add(i,k)));
+        instantiate!(sub(j, k));
+        match i {
+            Nat::Z => (),
+            Nat::S(i_prime) => {
+                instantiate!(Nat::S(i_prime));
+                instantiate!(sub(add(i_prime,j), add(i_prime,k)));
+                instantiate!(Nat::S(add(i_prime, j)));
+                instantiate!(Nat::S(add(i_prime, k)));
+                tip_eight(*i_prime, j, k);
+            }
+        }
+    }
+}
