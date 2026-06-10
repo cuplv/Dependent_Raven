@@ -63,38 +63,39 @@ pub fn synthesize_expr(
         }
 
         // [T-LET]: Let 바인딩 (let pat = bound_expr in body)
-        // [KOR] 
-        // 1. bound_expr의 타입을 추론합니다.
-        // 2. 새로운 스코프를 열고 패턴 변수를 환경에 바인딩한 뒤 body의 타입을 추론합니다.
-        // 3. 지역 변수 유출(Scope Leakage) 방지:
-        //    body의 추론된 타입 안에 지역 변수(pat)가 남아있어 밖으로 유출되면 SMT 솔버가 "Unbound Variable" 에러를 냅니다.
-        //    현재는 이를 막기 위해 정제 조건을 완전히 지워버리고 뼈대(BaseType)로 강등(Downgrading)시켜 반환합니다.
-        // TODO(Enhancement): 추후 Catalyst 논문에서 제시한 존재 양화사(Existential Quantification)와 스콜렘화(Skolemization) 
-        //                    기법을 도입하여, 정보 손실 없이 안전하게 타입을 밖으로 내보내는 방식으로 고도화해야 합니다.
         // [ENG]
         // 1. Infer the type of bound_expr.
         // 2. Open a new scope, bind pattern variables to the environment, and infer the type of the body.
         // 3. Prevention of Scope Leakage:
         //    If the inferred body type contains local variables (pat) and leaks outside, the SMT solver will throw an "Unbound Variable" error.
         //    Currently, to prevent this, we entirely drop the refinement predicate and downgrade to a BaseType before returning.
-        // TODO(Enhancement): In the future, implement the Existential Quantification and Skolemization technique presented in the Catalyst paper 
+        // TODO(Enhancement): In the future, implement the Existential Quantification and Skolemization technique
         //                    to safely export types without information loss.
         Expr::Let { pat, bound_expr, body } => {
-            // 1. bound_expr의 타입 추론
             let bound_type = synthesize_expr(env, bound_expr, global_specs, vcs);
 
-            // 2. 스코프를 열고 변수 바인딩 후 body 타입 추론
             let body_type = env.with_scope(|inner_env| {
                 bind_pattern_vars(inner_env, pat, &bound_type);
                 synthesize_expr(inner_env, body, global_specs, vcs)
             });
 
-            // 3. 변수 유출 방어를 위한 보수적 강등 (Conservative Downgrading)
-            // 이상적으로는 body_type 내부에 pat 변수가 쓰였는지 검사해야 하지만,
-            // 현재 증명 스크립트는 Unit만 반환하므로 무조건 강등해도 안전합니다.
-            match body_type {
-                Type::Refined(r) => Type::Base(r.base),
-                other => other, // BaseType, Arrow, Lemma 등은 그대로 반환
+            // [ENG] Substitution to prevent Scope Leakage:
+            //       If the pattern is a simple identifier, substitute all occurrences of it 
+            //       in the body's return type with the bound expression. 
+            //       This mathematically pure approach (used by F*) prevents unbound variables 
+            //       from leaking into the SMT query without losing refinement information.
+            if let Pattern::Ident(var_name) = pat {
+                substitute_expr_in_type(&body_type, var_name, bound_expr)
+            } else {
+                // [ENG] For complex patterns (like Tuples or Constructors), substitution is not trivially possible.
+                //       Currently, we conservatively downgrade the inferred type to its BaseType to prevent scope leakage.
+                //       TODO: In the future, implement "Existential Types (∃x:T1. T2)" as per the Catalyst paper.
+                //             This will allow us to perfectly encapsulate and export the scope of complex patterns 
+                //             without any information loss, by returning `Type::Exists(...)` instead of downgrading.
+                match body_type {
+                    Type::Refined(r) => Type::Base(r.base),
+                    other => other,
+                }
             }
         }
 
