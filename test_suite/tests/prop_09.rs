@@ -33,31 +33,21 @@ mod tip_benchmarks {
             Nat::S(x_min) => match y {
                 Nat::Z => x,
                 Nat::S(y_min) => sub(*x_min, *y_min),
-            }
+            },
         }
     }
 
     #[val((i: Nat, j: Nat, k: Nat) -> Lemma(sub(sub(i, j), k) == sub(i, add(j, k))))]
     fn tip_nine(i: Nat, j: Nat, k: Nat) {
-        instantiate!(sub(sub(i,j), k));
-        instantiate!(sub(i, add(j,k)));
         match i {
-            Nat::Z => {
-                ()
-            },
-            Nat::S(i_prime) => {
-                instantiate!(Nat::S(i_prime));
-                match j {
-                    Nat::Z => (),
-                    Nat::S(j_prime) => {
-                        instantiate!(Nat::S(j_prime));
-                        instantiate!(sub(sub(i_prime,j_prime), k));
-                        instantiate!(sub(i_prime, add(j_prime,k)));
-                        instantiate!(Nat::S(add(j_prime, k)));
-                        tip_nine(*i_prime, *j_prime, k);
-                    }
+            Nat::Z => (),
+            Nat::S(i_prime) => match j {
+                Nat::Z => (),
+                Nat::S(j_prime) => {
+                    instantiate!(Nat::S(add(j_prime, k)));
+                    tip_nine(*i_prime, *j_prime, k);
                 }
-            }
+            },
         }
     }
 }

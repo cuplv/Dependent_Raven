@@ -12,10 +12,6 @@ mod tip_benchmarks {
         S(Box<Nat>),
     }
 
-    // 2. Addition Function
-    // We declare the signature and its refinement (the behavior of addition).
-    // The macro will extract the signature to generate functionality axioms,
-    // and replace this function with a relational abstraction (add_rel) in the backend.
     #[val]
     #[recursive]
     pub fn add(x: Nat, y: Nat) -> Nat {
@@ -33,18 +29,17 @@ mod tip_benchmarks {
             Nat::S(x_min) => match y {
                 Nat::Z => x,
                 Nat::S(y_min) => sub(*x_min, *y_min),
-            },
+            }
         }
     }
 
-    #[val((i: Nat, j: Nat, k: Nat) -> Lemma(sub(add(i,j), add(i,k)) == sub(j, k)))]
-    fn tip_eight(i: Nat, j: Nat, k: Nat) {
-        match i {
+    #[val((n: Nat, m: Nat) -> Lemma(sub(n, add(n,m)) == Nat::Z))]
+    fn tip_six(n: Nat, m: Nat) {
+        match n {
             Nat::Z => (),
-            Nat::S(i_prime) => {
-                instantiate!(Nat::S(add(i_prime, j)));
-                instantiate!(Nat::S(add(i_prime, k)));
-                tip_eight(*i_prime, j, k);
+            Nat::S(n_prime) => {
+                instantiate!(Nat::S(add(n_prime,m)));
+                tip_six(*n_prime, m);
             }
         }
     }
