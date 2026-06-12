@@ -423,17 +423,33 @@ pub fn generate_subtyping_vc(
                 // [ENG] Based on the accumulated environment (Gamma \wedge e_1), generate the final 
                 //       Verification Condition (VC) that implies the Expected condition (pred_exp, i.e., e_2).
                 //       Inside `build_implication`, the form \forall v_sub. (Gamma \wedge e_1 \Rightarrow e_2) is completed.
-                let vc = inner_env.build_implication(pred_exp);
+                let vc = inner_env.build_implication(pred_exp.clone());
                 
                 // -----------------------------------------------------------------
                 // CONSEQUENCE: \Gamma \vdash \{\nu:B \mid e_1\} <: \{\nu:B \mid e_2\}
                 // -----------------------------------------------------------------
-                // [KOR] 현재 스코프에서 유효한 힌트들을 모아, 최종 VC와 함께 SubGoal로 포장하여 배열에 넣습니다.
-                // [ENG] Collect active instantiations for this specific scope and package them into a SubGoal.
-                let active_insts = inner_env.get_active_instantiations();
+                // [ENG] Collect manually provided instantiations for this specific scope.
+                let mut all_insts = inner_env.get_active_instantiations();
+
+                // [ENG] Automatic CEGQI Instantiation:
+                //       Scan the entire logical context and the expected target expression.
+                //       Extract all safe ground terms (functions/constructors) to automatically 
+                //       inject them as instantiation hints, relieving the user from writing manual hints.
+                let context_expr = inner_env.to_logical_context();
+                let mut auto_insts = crate::auto_inst::collect_ground_terms(&context_expr);
+                auto_insts.append(&mut crate::auto_inst::collect_ground_terms(&pred_exp));
+
+                // [ENG] Merge auto-collected hints with manual hints, ensuring no duplicates.
+                for inst in auto_insts {
+                    if !all_insts.contains(&inst) {
+                        all_insts.push(inst);
+                    }
+                }
+
+                // [ENG] Package the VC and its tailored instantiations into a SubGoal.
                 vcs.push(SubGoal {
                     property: vc,
-                    instantiations: active_insts,
+                    instantiations: all_insts,
                 });
             });
         }
