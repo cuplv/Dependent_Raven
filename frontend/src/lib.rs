@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod parser;
+pub mod resolve;
 pub mod env;
 pub mod typechecking;
 pub mod auto_inst;

@@ -141,7 +141,17 @@ pub enum Pattern {
     Ident(Ident),                       
     /// 생성자 패턴 (예: S(x'), Cons(hd, tl)) / Constructor pattern
     /// 귀납적 데이터 타입을 해체(Destructure)할 때 필수적 / Essential for destructuring inductive data types
-    Constructor(Ident, Vec<Pattern>),   
+    Constructor {
+        name: Ident,
+        args: Vec<Pattern>,
+        /// [KOR] 생성자 필드들의 sort. 파서는 None으로 두고, 등록 시점의
+        ///       resolve_pattern_types 패스가 datatypes 테이블을 조회해 채웁니다.
+        ///       소비자(bind_pattern_vars 등)는 None을 만나면 패스 누락으로 간주하고 panic해야 합니다.
+        /// [ENG] Sorts of the constructor's fields. The parser leaves this None;
+        ///       the resolve_pattern_types pass fills it at registration time from
+        ///       the datatypes table. Consumers must panic on None (missing pass).
+        arg_types: Option<Vec<BaseType>>,
+    },
     /// 튜플 패턴 (예: (x, y)) / Tuple pattern
     Tuple(Vec<Pattern>),                
 }

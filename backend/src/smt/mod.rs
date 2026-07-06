@@ -1,36 +1,40 @@
-pub mod solver;
 pub mod axioms;
 pub mod builder;
+pub mod solver;
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::collections::HashMap;
 
-use frontend::ast::{Program, Type, BaseType, Expr, UnOp, Pattern, BinOp, Ident};
-use frontend::typechecking::pattern_to_expr;
 use crate::anf::{transform_expr as anf_transform, NameGenerator};
-use crate::nnf::{transform_expr as nnf_transform};
-use crate::relabs::{transform_expr as relabs_transform};
 use crate::epr_check::{check_for_cycles, render_cycle};
-use crate::smt::solver::SolverConfig;
+use crate::nnf::transform_expr as nnf_transform;
+use crate::relabs::transform_expr as relabs_transform;
+use crate::smt::axioms::{disjointness_axiom, functionality_axiom, injectivity_axiom};
 use crate::smt::builder::{expr_to_smt, render_sort, sanitize_id};
-use crate::smt::axioms::{functionality_axiom, injectivity_axiom, disjointness_axiom};
+use crate::smt::solver::SolverConfig;
+use frontend::ast::{BaseType, BinOp, Expr, Ident, Pattern, Program, Type, UnOp};
+use frontend::typechecking::pattern_to_expr;
 
 /// Extracts variables inside a pattern to create binders for the Forall quantifier.
 /// This is used when creating axioms for pattern matching branches in recursive functions.
 fn extract_pat_binders(pat: &Pattern, ty: &BaseType, binders: &mut Vec<(String, BaseType)>) {
     match pat {
         Pattern::Ident(name) => binders.push((name.clone(), ty.clone())),
-        Pattern::Constructor(_, args) => {
-            for arg in args {
-                // For simplicity, we assume arguments of a recursive datatype 
-                // have the same BaseType as the parent. 
-                // In a fully generalized system, we would look up the exact constructor signature.
-                extract_pat_binders(arg, ty, binders);
+        Pattern::Constructor { name, args, arg_types } => {
+            // Field sorts come from arg_types, stamped by frontend::resolve::resolve_pattern_types.
+            let field_types = arg_types.as_ref().unwrap_or_else(|| panic!(
+                "Constructor pattern '{}' has unresolved field types (resolve_pattern_types was not run)",
+                name
+            ));
+            for (arg, field_ty) in args.iter().zip(field_types.iter()) {
+                extract_pat_binders(arg, field_ty, binders);
             }
         }
         Pattern::Wildcard => {}
-        Pattern::Tuple(_) => panic!("Tuple patterns are not yet supported in recursive function axiom generation"),
+        Pattern::Tuple(_) => {
+            panic!("Tuple patterns are not yet supported in recursive function axiom generation")
+        }
     }
 }
 
@@ -59,14 +63,17 @@ fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
 /// [KOR] Program 객체를 받아 각 목표(Goal)에 대해 파이프라인을 순차적으로 수행합니다.
 ///       RAVENCHECK_DUMP_IR 환경 변수가 설정된 경우 중간 변환 결과(IR)를 logs 폴더에 파일로 저장합니다.
 pub fn encode_and_solve(program: Program) -> Result<(), String> {
-    println!("\n [Backend] Starting Pipeline for {} goals...", program.goals.len());
-    
+    println!(
+        "\n [Backend] Starting Pipeline for {} goals...",
+        program.goals.len()
+    );
+
     // 1. 디버깅 플래그 확인 (RAVENCHECK_DUMP_IR)
     let dump_ir = env::var("RAVENCHECK_DUMP_IR").is_ok();
     if dump_ir {
         let _ = fs::create_dir_all("logs");
     }
-    
+
     struct ProcessedGoal {
         name: Ident,
         skolem_vars: Vec<(Ident, BaseType)>,
@@ -84,12 +91,12 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         let mut gen = NameGenerator::new();
         let anf_expr = anf_transform(&negated_goal, &mut gen);
         let nnf_expr = nnf_transform(anf_expr.clone());
-        
+
         // [KOR] Skolemize: 최상단 Exists 변수들을 뽑아내어 전역 상수(declare-const)로 만듭니다.
         let (skolem_vars, skolem_body) = crate::skolemize::skolemize_expr(&nnf_expr);
 
         let relabs_expr = relabs_transform(&skolem_body, &program.functions);
-        
+
         let mut relabs_insts = Vec::new();
         for inst in &goal.instantiations {
             let inst_expr = Expr::Instantiate(Box::new(inst.clone()));
@@ -111,7 +118,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             write_log("1_anf", format!("{:#?}", anf_expr));
             write_log("2_nnf", format!("{:#?}", nnf_expr));
             write_log("3_relabs", format!("{:#?}", relabs_expr));
-            
+
             println!("  💾 Saved IR logs to `logs/{}_*.log`", goal.name);
         }
         processed_goals.push(ProcessedGoal {
@@ -123,7 +130,10 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     }
 
     // 2. EPR 프래그먼트 검사 (Sort Cycle Check) - RelAbs 이후에 수행!
-    let goals_for_check: Vec<_> = processed_goals.iter().map(|g| g.relabs_expr.clone()).collect();
+    let goals_for_check: Vec<_> = processed_goals
+        .iter()
+        .map(|g| g.relabs_expr.clone())
+        .collect();
     if let Err(cycles) = check_for_cycles(&goals_for_check, &program.functions) {
         let mut err_msg = String::from("Found Sort Cycles! This breaks decidability.\n");
         for c in cycles {
@@ -136,10 +146,10 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
 
     // 3. SMT 인코딩 및 실행
     let mut config = SolverConfig::default();
-    
+
     // 로그 폴더가 없으면 미리 생성합니다.
     let _ = fs::create_dir_all("logs");
-    
+
     for goal in processed_goals {
         let goal_name = goal.name;
         println!(" Solving Goal: {}", goal_name);
@@ -147,7 +157,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // 무조건 .smt2 파일에 로그를 남기도록 설정합니다.
         let smt_log_path = format!("logs/{}_failed_query.smt2", goal_name);
         config.set_log_file(smt_log_path.clone());
-        
+
         let mut builder = config.context_builder();
         let mut ctx = builder.build().expect("Failed to build SMT context");
         ctx.set_logic("ALL").unwrap();
@@ -168,41 +178,44 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             for (cons_name, arg_types) in variants {
                 if arg_types.is_empty() {
                     // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
-                    let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name)); 
-                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type))).unwrap();
+                    let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name));
+                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type)))
+                        .unwrap();
                     // 상수는 Functionality와 Injectivity 공리가 필요 없습니다.
                 } else {
                     // [KOR] 인자가 있는 생성자 (예: Nat::S)는 관계식으로 변환됨
-                    let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name)); 
-                    
+                    let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name));
+
                     let mut smt_args = Vec::new();
                     for ty in arg_types {
                         smt_args.push(ctx.atom(render_sort(ty)));
                     }
                     smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
-                    
+
                     // (declare-fun ...)
-                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool")).unwrap();
-                    
+                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"))
+                        .unwrap();
+
                     // Functionality Axiom
                     let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
                     let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
                     ctx.assert(func_ax_smt).unwrap();
-                    
+
                     // Injectivity Axiom
                     let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
                     let inj_ax_smt = expr_to_smt(&mut ctx, &inj_ax).unwrap();
                     ctx.assert(inj_ax_smt).unwrap();
                 }
             }
-            
+
             // Disjointness Axiom
             for i in 0..variants.len() {
                 for j in (i + 1)..variants.len() {
                     let (cons1, args1) = &variants[i];
                     let (cons2, args2) = &variants[j];
-                    
-                    let disj_ax = disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
+
+                    let disj_ax =
+                        disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
                     let disj_ax_smt = expr_to_smt(&mut ctx, &disj_ax).unwrap();
                     ctx.assert(disj_ax_smt).unwrap();
                 }
@@ -213,20 +226,21 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         for (func_name, def) in &program.functions {
             let (arg_types, out_type) = get_fun_types(&def.signature);
             let rel_name = format!("{}_rel", func_name);
-            
+
             let mut smt_args = Vec::new();
             for ty in &arg_types {
                 smt_args.push(ctx.atom(render_sort(ty)));
             }
             smt_args.push(ctx.atom(render_sort(&out_type)));
-            
-            ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool")).unwrap();
-            
+
+            ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"))
+                .unwrap();
+
             let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
             let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
             ctx.assert(func_ax_smt).unwrap();
 
-// 🌟 [추가된 부분] 재귀 함수인 경우, 본문(Match)을 분해하여 각 브랜치별로 공리(Axiom)를 생성합니다.
+            // [추가된 부분] 재귀 함수인 경우, 본문(Match)을 분해하여 각 브랜치별로 공리(Axiom)를 생성합니다.
             // By doing this, we expose the semantics of the recursive function to the SMT solver
             // using the relational abstraction, thus preventing sort cycles and matching loops.
             if def.is_recursive {
@@ -236,7 +250,10 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                     let mut curr_ty = &def.signature;
                     while let Type::Arrow(f) = curr_ty {
                         let base_ty = match &*f.param_type {
-                            Type::Base(b) | Type::Refined(frontend::ast::RefinedType { base: b, .. }) => b.clone(),
+                            Type::Base(b)
+                            | Type::Refined(frontend::ast::RefinedType { base: b, .. }) => {
+                                b.clone()
+                            }
                             _ => panic!("Complex param types not supported in backend"),
                         };
                         params.push((f.param_name.clone(), base_ty));
@@ -268,7 +285,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // 3.4. Skolem Variables 및 Instantiations 추가
         // [KOR] Phase 2에서 뽑아낸 전역 상수(Skolem variables)들을 선언합니다.
         for (var_name, var_type) in &goal.skolem_vars {
-            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type))).unwrap();
+            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type)))
+                .unwrap();
         }
 
         // [KOR] Phase 3에서 변환한 인스턴스화 공리들을 각각 별도의 assert(exists ...) 구문으로 꽂아 넣습니다.
@@ -281,7 +299,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         let goal_smt = expr_to_smt(&mut ctx, &goal.relabs_expr).unwrap();
         // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
         ctx.assert(goal_smt).unwrap();
-        
+
         match ctx.check().unwrap() {
             easy_smt::Response::Sat => {
                 return Err(format!(
@@ -298,11 +316,14 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             easy_smt::Response::Unsat => {
                 // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
                 let _ = fs::remove_file(&smt_log_path);
-                println!("  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)", goal_name);
+                println!(
+                    "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
+                    goal_name
+                );
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -318,7 +339,11 @@ fn generate_axioms_from_body(
     ctx: &mut easy_smt::Context,
     program: &Program,
 ) {
-    if let Expr::Match { expr: match_target, arms } = expr {
+    if let Expr::Match {
+        expr: match_target,
+        arms,
+    } = expr
+    {
         // We assume the match target is a simple variable in this backend axiom generation phase.
         let matched_var = match &**match_target {
             Expr::Var(v) => v.clone(),
@@ -335,8 +360,13 @@ fn generate_axioms_from_body(
             // Determine the base type of the matched variable to correctly type the new binders
             // In a fully generalized system, we would look up the specific constructor's signature,
             // but for simplicity, we assume recursive arguments have the same type as the parent.
-            let matched_ty = binders.iter().find(|(n, _)| n == &matched_var).unwrap().1.clone();
-            
+            let matched_ty = binders
+                .iter()
+                .find(|(n, _)| n == &matched_var)
+                .unwrap()
+                .1
+                .clone();
+
             // Extract any new variables introduced inside the pattern and add them to the universal binders
             extract_pat_binders(pat, &matched_ty, &mut new_binders);
 
@@ -346,10 +376,11 @@ fn generate_axioms_from_body(
             // Update the arguments map: substitute the matched variable with the pattern expression
             new_args_map.insert(matched_var.clone(), pat_expr.clone());
 
-            // CRUCIAL: Substitute occurrences of the matched variable with the pattern expression 
+            // CRUCIAL: Substitute occurrences of the matched variable with the pattern expression
             // inside the arm's body. If the body uses `x` and `x` was matched against `Nat::S(x_min)`,
             // `x` in the body must be replaced by `Nat::S(x_min)` so no unbound variables remain.
-            let substituted_body = frontend::env::substitute_expr(arm_expr, &matched_var, &pat_expr);
+            let substituted_body =
+                frontend::env::substitute_expr(arm_expr, &matched_var, &pat_expr);
 
             // Recursively process the substituted body of this arm
             generate_axioms_from_body(
@@ -395,7 +426,7 @@ fn generate_axioms_from_body(
 
         // Pass this raw axiom through the standard transformation pipeline
         // (ANF -> NNF -> RelAbs) just like the main verification goal.
-        // This flattens nested calls into `Let` bindings, pushes negations, and finally 
+        // This flattens nested calls into `Let` bindings, pushes negations, and finally
         // transforms them into relational logic (Implies), entirely avoiding sort cycles.
         let mut gen = NameGenerator::new();
         let anf_expr = anf_transform(&axiom, &mut gen);

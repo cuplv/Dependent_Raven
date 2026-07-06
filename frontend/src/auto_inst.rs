@@ -113,7 +113,7 @@ fn add_pat_vars_to_blacklist(pat: &Pattern, blacklist: &mut HashSet<Ident>) {
         Pattern::Ident(name) => { 
             blacklist.insert(name.clone()); 
         }
-        Pattern::Constructor(_, args) | Pattern::Tuple(args) => {
+        Pattern::Constructor { args, .. } | Pattern::Tuple(args) => {
             for a in args { 
                 add_pat_vars_to_blacklist(a, blacklist); 
             }

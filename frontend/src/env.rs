@@ -356,7 +356,7 @@ fn pattern_contains_var(pat: &Pattern, var: &Ident) -> bool {
     match pat {
         Pattern::Wildcard => false,
         Pattern::Ident(name) => name == var,
-        Pattern::Constructor(_, args) | Pattern::Tuple(args) => {
+        Pattern::Constructor { args, .. } | Pattern::Tuple(args) => {
             args.iter().any(|p| pattern_contains_var(p, var))
         }
     }

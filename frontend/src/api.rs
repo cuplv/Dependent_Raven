@@ -112,7 +112,13 @@ pub fn register_val(program: &mut Program, fn_name: &str, sig_str: Option<&str>,
         label: None,
         block: *item_fn.block.clone(),
     });
-    let body_expr = convert_expr(&block_expr);
+    let mut body_expr = convert_expr(&block_expr);
+
+    // [KOR] 생성자 패턴에 필드 sort를 새깁니다. 본문이 functions에 저장되거나
+    //       타입 체킹되기 전에 실행되어야 합니다. (자세한 내용은 resolve.rs 참고)
+    // [ENG] Stamp constructor patterns with their field sorts. Must run before the
+    //       body is stored in `functions` or type-checked. (See resolve.rs.)
+    crate::resolve::resolve_pattern_types(&mut body_expr, &program.datatypes);
 
     // 환경에 함수 먼저 등록 (재귀 호출 대비)
     program.functions.insert(fn_name.to_string(), FunctionDef {

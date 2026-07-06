@@ -494,7 +494,7 @@ pub fn convert_pattern(pat: &syn::Pat) -> Pattern {
         syn::Pat::TupleStruct(pts) => {
             let ident = pts.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>().join("::");
             let args = pts.elems.iter().map(convert_pattern).collect();
-            Pattern::Constructor(ident, args)
+            Pattern::Constructor { name: ident, args, arg_types: None }
         }
         syn::Pat::Tuple(pt) => {
             let args = pt.elems.iter().map(convert_pattern).collect();
@@ -502,7 +502,7 @@ pub fn convert_pattern(pat: &syn::Pat) -> Pattern {
         }
         syn::Pat::Path(pp) => {
             let ident = pp.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>().join("::");
-            Pattern::Constructor(ident, vec![])
+            Pattern::Constructor { name: ident, args: vec![], arg_types: None }
         }
         _ => unimplemented!("Unsupported pattern: {:?}", pat),
     }

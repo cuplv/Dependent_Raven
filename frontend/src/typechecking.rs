@@ -536,15 +536,15 @@ pub fn bind_pattern_vars(env: &mut TypeEnv, pat: &Pattern, ty: &Type) {
                 bind_pattern_vars(env, p, &Type::Base(t_base.clone()));
             }
         }
-        (Pattern::Constructor(_, args), _) => {
-            // 생성자 패턴의 인자들(예: S(x_prime)의 x_prime)은 
-            // 원래 데이터 타입과 동일한 BaseType을 가진다고 가정 (단순화)
-            let base = match ty {
-                Type::Base(b) | Type::Refined(RefinedType { base: b, .. }) => b.clone(),
-                _ => panic!("Cannot bind constructor pattern to complex type"),
-            };
-            for arg_pat in args {
-                bind_pattern_vars(env, arg_pat, &Type::Base(base.clone()));
+        (Pattern::Constructor { name, args, arg_types }, _) => {
+            // [KOR] 필드 sort는 resolve_pattern_types가 새겨둔 arg_types에서 읽습니다.
+            // [ENG] Field sorts come from arg_types, stamped by resolve_pattern_types.
+            let field_types = arg_types.as_ref().unwrap_or_else(|| panic!(
+                "Constructor pattern '{}' has unresolved field types (resolve_pattern_types was not run)",
+                name
+            ));
+            for (arg_pat, field_ty) in args.iter().zip(field_types.iter()) {
+                bind_pattern_vars(env, arg_pat, &Type::Base(field_ty.clone()));
             }
         }
         _ => panic!("Binding mismatch: {:?} vs {:?}", pat, ty),
@@ -571,7 +571,7 @@ pub fn pattern_to_expr(pat: &Pattern) -> Expr {
     match pat {
         Pattern::Wildcard => unimplemented!("Wildcard is not allowed currently"), 
         Pattern::Ident(name) => Expr::Var(name.clone()),
-        Pattern::Constructor(name, args) => {
+        Pattern::Constructor { name, args, .. } => {
             Expr::Constructor { name: name.clone(), args: args.iter().map(pattern_to_expr).collect() }
         }
         Pattern::Tuple(elems) => Expr::Tuple(elems.iter().map(pattern_to_expr).collect()),
