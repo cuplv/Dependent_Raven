@@ -223,6 +223,17 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         }
 
         // 3.3. 일반 함수 (Functions) 및 공리 선언
+        // [KOR] 두 단계로 나눕니다: 먼저 모든 함수의 관계를 선언하고, 그 다음에 정의
+        //       공리를 assert합니다. 한 함수의 정의 공리는 다른 함수의 관계를 참조할 수
+        //       있는데(예: count의 공리가 eq_nat_rel을 언급), `program.functions`는
+        //       HashMap이라 순회 순서가 실행마다 달라서, 단일 루프에서는 아직 선언되지
+        //       않은 관계를 참조하는 공리가 간헐적으로 solver 에러를 냈습니다.
+        // [ENG] Two phases: declare ALL function relations first, THEN assert
+        //       definitional axioms. A function's definitional axioms may reference
+        //       other functions' relations (e.g. count's axioms mention eq_nat_rel),
+        //       and `program.functions` is a HashMap with per-run iteration order --
+        //       a single loop intermittently asserted axioms referencing relations
+        //       that were not declared yet, killing the solver.
         for (func_name, def) in &program.functions {
             let (arg_types, out_type) = get_fun_types(&def.signature);
             let rel_name = format!("{}_rel", func_name);
@@ -239,11 +250,26 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
             let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
             ctx.assert(func_ax_smt).unwrap();
+        }
 
-            // [추가된 부분] 재귀 함수인 경우, 본문(Match)을 분해하여 각 브랜치별로 공리(Axiom)를 생성합니다.
-            // By doing this, we expose the semantics of the recursive function to the SMT solver
-            // using the relational abstraction, thus preventing sort cycles and matching loops.
-            if def.is_recursive {
+        for (func_name, def) in &program.functions {
+            let (_, out_type) = get_fun_types(&def.signature);
+
+            // [KOR] 본문이 있는 모든 "값 반환" 함수(재귀든 아니든)의 본문을 분해하여
+            //       브랜치별 정의 공리를 생성합니다. 비재귀 함수는 자기 호출이 0개인
+            //       재귀 함수일 뿐이며, 아래 leaf 케이스가 `forall params. f(params) == body`를
+            //       그대로 만들어냅니다. (G3)
+            //       Unit 반환 함수는 제외합니다: Lemma의 본문은 정의가 아니라 증명
+            //       스크립트이므로, `tip_x(..) == ()` 같은 공리는 무의미하고 그 Tuple
+            //       leaf는 expr_to_smt에서 panic합니다.
+            // [ENG] Emit per-branch definitional axioms for EVERY bodied, value-returning
+            //       function (recursive or not) -- a non-recursive function is just a
+            //       recursive function with zero self-calls; the leaf case below emits
+            //       `forall params. f(params) == body` as-is. (G3)
+            //       Unit-returning functions are excluded: lemma bodies are proof
+            //       scripts, not definitions -- a `tip_x(..) == ()` axiom would be
+            //       meaningless and its Tuple leaf panics in expr_to_smt.
+            if out_type != BaseType::Unit {
                 if let Some(body_expr) = &def.body {
                     // Extract the names and base types of all formal parameters of the function.
                     let mut params = Vec::new();
@@ -268,13 +294,14 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                         initial_binders.push((p_name.clone(), p_ty.clone()));
                     }
 
-                    // Recursively flatten nested matches and generate axioms
+                    // Recursively flatten nested matches/ifs and generate axioms
                     generate_axioms_from_body(
                         body_expr,
                         &initial_args_map,
                         &initial_binders,
                         &func_name,
                         &params,
+                        &[],
                         &mut ctx,
                         &program,
                     );
@@ -336,6 +363,7 @@ fn generate_axioms_from_body(
     binders: &Vec<(Ident, BaseType)>,
     func_name: &str,
     params: &[(Ident, BaseType)],
+    guards: &[Expr],
     ctx: &mut easy_smt::Context,
     program: &Program,
 ) {
@@ -382,6 +410,14 @@ fn generate_axioms_from_body(
             let substituted_body =
                 frontend::env::substitute_expr(arm_expr, &matched_var, &pat_expr);
 
+            // Guards accumulated from enclosing `if`s may also mention the matched
+            // variable; substitute so they stay consistent with the instantiated
+            // pattern (otherwise the final axiom would contain an unbound variable).
+            let substituted_guards: Vec<Expr> = guards
+                .iter()
+                .map(|g| frontend::env::substitute_expr(g, &matched_var, &pat_expr))
+                .collect();
+
             // Recursively process the substituted body of this arm
             generate_axioms_from_body(
                 &substituted_body,
@@ -389,10 +425,32 @@ fn generate_axioms_from_body(
                 &new_binders,
                 func_name,
                 params,
+                &substituted_guards,
                 ctx,
                 program,
             );
         }
+    } else if let Expr::If { cond, then_expr, else_expr } = expr {
+        // Branch conditions become guards on the branch's equations (G3):
+        //   then-branch:  guards, cond      |-  f(args) == then_expr
+        //   else-branch:  guards, not cond  |-  f(args) == else_expr
+        // Each branch yields its own single-polarity axiom, which the standard
+        // ANF -> NNF -> RelAbs pipeline encodes like any other formula (calls
+        // inside `cond` get relationally abstracted along the way).
+        let mut then_guards = guards.to_vec();
+        then_guards.push((**cond).clone());
+        generate_axioms_from_body(
+            then_expr, args_map, binders, func_name, params, &then_guards, ctx, program,
+        );
+
+        let mut else_guards = guards.to_vec();
+        else_guards.push(Expr::UnOp {
+            op: UnOp::Not,
+            expr: cond.clone(),
+        });
+        generate_axioms_from_body(
+            else_expr, args_map, binders, func_name, params, &else_guards, ctx, program,
+        );
     } else {
         // We have reached a leaf expression (no top-level `Match`).
         // Construct the Left-Hand Side (LHS) of the equation using the original parameter order
@@ -414,13 +472,31 @@ fn generate_axioms_from_body(
             right: Box::new(expr.clone()),
         };
 
+        // Guards from enclosing `if` branches condition the equation:
+        // (g1 && ... && gn) => f(args) == leaf. Under the partial-function
+        // semantics, an instance whose guard terms are undefined is vacuously
+        // satisfied, so this introduces no new incompleteness class beyond the
+        // usual "instantiate the terms you need".
+        let axiom_body = match guards.iter().cloned().reduce(|acc, g| Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(acc),
+            right: Box::new(g),
+        }) {
+            Some(guard_conj) => Expr::BinOp {
+                op: BinOp::Implies,
+                left: Box::new(guard_conj),
+                right: Box::new(eq_expr),
+            },
+            None => eq_expr,
+        };
+
         // Wrap the equation in a Forall quantifier over all accumulated active binders.
         let axiom = if binders.is_empty() {
-            eq_expr
+            axiom_body
         } else {
             Expr::Forall {
                 binders: binders.clone(),
-                body: Box::new(eq_expr),
+                body: Box::new(axiom_body),
             }
         };
 

@@ -395,6 +395,17 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
             // [ENG] Iterate statements in reverse. The last statement is the return value,
             //       and preceding instantiate! macros are chained as Let bindings.
             for (i, stmt) in b.block.stmts.iter().rev().enumerate() {
+                // [KOR] `let` 문은 현재 조용히 삭제됩니다(G2). 삭제된 본문이 정의 공리가
+                //       되면 틀린 공리(비건전)가 되므로, G2가 해결될 때까지 시끄럽게 거부합니다.
+                // [ENG] `let` statements are currently dropped silently (G2). A truncated
+                //       body turned into a definitional axiom would be a WRONG axiom
+                //       (unsound), so reject loudly until G2 lands.
+                if let syn::Stmt::Local(_) = stmt {
+                    panic!(
+                        "`let` statements in bodies are not supported yet (G2, see doc/code_review_analysis.md); \
+                         refactor the body to avoid `let` bindings"
+                    );
+                }
                 if i == 0 {
                     // 블록의 가장 마지막 구문 (반환값)
                     match stmt {
