@@ -185,6 +185,16 @@ pub fn synthesize_expr(
                 panic!("Unbound function or lemma: {}", func);
             };
 
+            // The callee's parameter names are only placeholders. If an actual
+            // argument happens to be a variable with the same name as a LATER
+            // parameter (e.g. calling `f(y, ..)` where f's second parameter is
+            // also called `y`), plain textual substitution would conflate the
+            // two: the first substitution writes `y` into the signature, and
+            // the second one rewrites it again. Renaming every parameter to a
+            // fresh name before substituting the actuals makes such collisions
+            // impossible.
+            current_sig = freshen_params(env, current_sig);
+
             // -----------------------------------------------------------------
             // PREMISE 2: \Gamma \vdash e : \tau_{in}
             // -----------------------------------------------------------------
@@ -297,14 +307,86 @@ pub fn check_expr(
         // ---------------------------------------------------------
         // [T-LET]: Let 바인딩 (Checking Mode)
         // ---------------------------------------------------------
-        // [KOR] 블록 안에 instantiate! 나 다른 let 구문이 섞여 있을 때,
-        //       마지막 구문이 Match라면 Checking Mode를 그대로 유지하며 내려보내야 합니다.
-        // [ENG] When a block contains `instantiate!` or other `let` bindings,
-        //       we must propagate the Expected type down to the body so that `Match` can use it.
+        // [KOR] 파서가 블록을 Let 체인으로 변환하므로, 블록의 모든 구문이 이 규칙을
+        //       지나갑니다. 이 규칙의 역할은 각 구문이 알려주는 사실을 환경에 예치하여,
+        //       같은 스코프에서 나중에 생성되는 검증 조건들이 그 사실을 쓸 수 있게
+        //       하는 것입니다:
+        //       1. 와일드카드 승격 — 값이 `_`에 묶이더라도 그 타입이 조건(refinement)을
+        //          담고 있으면(예: Lemma 호출의 결과 타입은 사후조건을 담음) 내부용
+        //          이름을 만들어 바인딩합니다. 이름이 있어야 to_logical_context가 그
+        //          조건을 논리 문맥에 넣어줄 수 있기 때문입니다.
+        //       2. 정의 방정식 — `이름 == 우변` 을 path condition으로 추가합니다. 이
+        //          언어는 부수 효과가 없으므로 이 등식은 항상 참입니다. 이것이 있어야
+        //          `let y = add(a,b)` 이후의 증명이 y가 무엇인지 알 수 있습니다.
+        //          Unit 타입(등식이 무의미)과 함수 타입(함수 동치 미지원)은 생략.
+        //       3. 본문은 같은 expected 타입에 대해 계속 검사합니다 — 바인딩된 사실은
+        //          환경에 남고, 반환할 타입은 필요 없습니다.
+        // [ENG] The parser converts blocks into Let chains, so every block statement
+        //       passes through this rule. Its job is to deposit what each statement
+        //       teaches us into the environment, so verification conditions generated
+        //       later in the same scope can use it:
+        //       1. Wildcard upgrade — even if a value is bound to `_`, when its type
+        //          carries a condition (e.g. a lemma call's result type carries its
+        //          postcondition) we invent an internal name and bind it. Only named
+        //          bindings are picked up by to_logical_context, so the name is what
+        //          lets the condition reach the logical context.
+        //       2. Defining equation — add `name == right-hand side` as a path
+        //          condition. The language has no side effects, so this equation is
+        //          always true. It is what lets proofs after `let y = add(a,b)` know
+        //          what y is. Skipped for Unit-typed values (the equation would be
+        //          meaningless) and function-typed values (no function equality).
+        //       3. Keep checking the body against the same expected type — the bound
+        //          facts stay in the environment; no type needs to be returned.
         Expr::Let { pat, bound_expr, body } => {
             let bound_type = synthesize_expr(env, bound_expr, global_specs, vcs);
             env.with_scope(|inner_env| {
-                bind_pattern_vars(inner_env, pat, &bound_type);
+                // [1] Bind, upgrading interesting wildcards to fresh names.
+                let bound_name: Option<Ident> = match pat {
+                    Pattern::Ident(name) => {
+                        bind_pattern_vars(inner_env, pat, &bound_type);
+                        Some(name.clone())
+                    }
+                    Pattern::Wildcard => match base_of(&bound_type) {
+                        // Unit-typed bounds with no refinement carry no knowledge
+                        // (e.g. Instantiate links) — keep the historical no-op.
+                        Some(BaseType::Unit) if !matches!(bound_type, Type::Refined(_)) => None,
+                        // Arrow-typed bounds: functions are never named into Γ.
+                        None => None,
+                        _ => {
+                            let fresh = inner_env.fresh("_bind");
+                            inner_env.insert_var(fresh.clone(), bound_type.clone());
+                            Some(fresh)
+                        }
+                    },
+                    // Constructor/Tuple patterns: bind the field variables at
+                    // their declared field types; the defining equation is
+                    // added below using the pattern written as a term.
+                    _ => {
+                        bind_pattern_vars(inner_env, pat, &bound_type);
+                        None
+                    }
+                };
+
+                // [2] Defining equation: name == right-hand side
+                //     (or pattern == right-hand side for destructuring patterns).
+                let selfify = match base_of(&bound_type) {
+                    Some(BaseType::Unit) | None => false, // Unit or Arrow: no equation
+                    Some(_) => true,
+                };
+                if selfify {
+                    if let Some(name) = &bound_name {
+                        inner_env.add_path_condition(Expr::BinOp {
+                            op: BinOp::Eq,
+                            left: Box::new(Expr::Var(name.clone())),
+                            right: Box::new((**bound_expr).clone()),
+                        });
+                    } else if !matches!(pat, Pattern::Wildcard) {
+                        // Constructor/Tuple pattern: bound_expr == pattern-as-term.
+                        inner_env.add_path_condition(build_pattern_eq_expr(bound_expr, pat));
+                    }
+                }
+
+                // [3] Continue in checking mode.
                 check_expr(inner_env, body, expected, global_specs, vcs);
             });
         }
@@ -575,6 +657,43 @@ pub fn pattern_to_expr(pat: &Pattern) -> Expr {
             Expr::Constructor { name: name.clone(), args: args.iter().map(pattern_to_expr).collect() }
         }
         Pattern::Tuple(elems) => Expr::Tuple(elems.iter().map(pattern_to_expr).collect()),
+    }
+}
+
+/// Renames every parameter of a function signature to a fresh name, rewriting
+/// all references to it in the rest of the signature (later parameter types and
+/// the return refinement). After this, substituting actual arguments for the
+/// parameters can never collide with a name the caller happens to use, because
+/// no caller variable can share a name with a freshly generated parameter.
+fn freshen_params(env: &mut TypeEnv, ty: Type) -> Type {
+    match ty {
+        Type::Arrow(f) => {
+            let fresh = env.fresh("_arg");
+            // References to this parameter live in the remainder of the
+            // signature; its own refinement refers to it via its bound
+            // variable, which is untouched by design.
+            let renamed_ret =
+                substitute_expr_in_type(&f.ret_type, &f.param_name, &Expr::Var(fresh.clone()));
+            Type::Arrow(FunType {
+                param_name: fresh,
+                param_type: f.param_type,
+                ret_type: Box::new(freshen_params(env, renamed_ret)),
+            })
+        }
+        other => other,
+    }
+}
+
+/// [KOR] 타입의 밑바탕 BaseType을 돌려줍니다 (함수 타입이면 None). Let 규칙이
+///       "Unit이면 등식 생략 / 함수 타입이면 이름 부여 생략"을 판단할 때 사용합니다.
+/// [ENG] Returns the underlying BaseType (None for a function type). Used by the
+///       Let rule to decide "skip the equation for Unit / skip naming for
+///       function-typed values".
+fn base_of(ty: &Type) -> Option<BaseType> {
+    match ty {
+        Type::Base(b) => Some(b.clone()),
+        Type::Refined(r) => Some(r.base.clone()),
+        Type::Arrow(_) => None,
     }
 }
 

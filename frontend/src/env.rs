@@ -30,6 +30,14 @@ impl Default for Scope {
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     scopes: Vec<Scope>,
+    /// [KOR] fresh 이름 생성용 카운터. 이름 없는 값에 내부용 이름이 필요할 때
+    ///       (예: 와일드카드 `_`로 묶인 값을 논리 문맥에 넣기 위해), 또는 호출자의
+    ///       변수와 절대 겹치지 않는 이름이 필요할 때 사용됩니다.
+    /// [ENG] Counter for generating fresh names. Used whenever a nameless value
+    ///       needs an internal name (e.g. a value bound to the wildcard `_` that
+    ///       must still enter the logical context), or when a name is needed
+    ///       that can never collide with the caller's variables.
+    fresh_counter: u32,
 }
 
 impl TypeEnv {
@@ -37,7 +45,23 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             scopes: vec![Scope::default()],
+            fresh_counter: 0,
         }
+    }
+
+    /// [KOR] 아직 사용되지 않은 이름을 만들어 반환합니다 (예: "_bind_0", "_bind_1").
+    ///       하나의 TypeEnv는 함수 하나의 검사와 수명이 같으므로, 카운터만으로 그
+    ///       범위 안에서의 유일성이 보장됩니다. 사용자 변수와의 충돌은 밑줄로
+    ///       시작하는 접두사 규약으로 회피합니다.
+    /// [ENG] Returns a not-yet-used name (e.g. "_bind_0", "_bind_1"). One
+    ///       TypeEnv lives exactly as long as the checking of one function, so
+    ///       the counter alone guarantees uniqueness within that scope.
+    ///       Collisions with user variables are avoided by the
+    ///       underscore-prefix convention.
+    pub fn fresh(&mut self, prefix: &str) -> Ident {
+        let name = format!("{}_{}", prefix, self.fresh_counter);
+        self.fresh_counter += 1;
+        name
     }
 
     /// [ENG] Injects a manual instantiation hint into the current (most deeply nested) scope.

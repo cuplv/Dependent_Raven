@@ -387,84 +387,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
             Expr::Match { expr, arms }
         }
         SynExpr::Paren(p) => convert_expr(&p.expr),
-        SynExpr::Block(b) => {
-            let mut current_expr = Expr::Tuple(vec![]);
-            
-            // [KOR] 블록 내의 구문들을 역순으로 순회하며, 마지막 구문은 반환값으로, 
-            //       이전 구문들 중 instantiate! 매크로는 Let 바인딩으로 엮어줍니다.
-            // [ENG] Iterate statements in reverse. The last statement is the return value,
-            //       and preceding instantiate! macros are chained as Let bindings.
-            for (i, stmt) in b.block.stmts.iter().rev().enumerate() {
-                // [KOR] `let` 문은 현재 조용히 삭제됩니다(G2). 삭제된 본문이 정의 공리가
-                //       되면 틀린 공리(비건전)가 되므로, G2가 해결될 때까지 시끄럽게 거부합니다.
-                // [ENG] `let` statements are currently dropped silently (G2). A truncated
-                //       body turned into a definitional axiom would be a WRONG axiom
-                //       (unsound), so reject loudly until G2 lands.
-                if let syn::Stmt::Local(_) = stmt {
-                    panic!(
-                        "`let` statements in bodies are not supported yet (G2, see doc/code_review_analysis.md); \
-                         refactor the body to avoid `let` bindings"
-                    );
-                }
-                if i == 0 {
-                    // 블록의 가장 마지막 구문 (반환값)
-                    match stmt {
-                        syn::Stmt::Expr(e, None) => {
-                            current_expr = convert_expr(e);
-                        }
-                        syn::Stmt::Expr(e, Some(_)) => {
-                            // 세미콜론으로 끝나는 경우에도 값을 취함 (Instantiate 등)
-                            let expr = convert_expr(e);
-                            if let Expr::Instantiate(_) = expr {
-                                current_expr = Expr::Let {
-                                    pat: Pattern::Wildcard,
-                                    bound_expr: Box::new(expr),
-                                    body: Box::new(Expr::Tuple(vec![])),
-                                };
-                            } else {
-                                current_expr = expr;
-                            }
-                        }
-                        syn::Stmt::Macro(m) => {
-                            let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
-                            if mac_name == "instantiate" {
-                                if let Ok(inner) = syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
-                                    current_expr = Expr::Let {
-                                        pat: Pattern::Wildcard,
-                                        bound_expr: Box::new(Expr::Instantiate(Box::new(convert_expr(&inner)))),
-                                        body: Box::new(Expr::Tuple(vec![])),
-                                    };
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                } else {
-                    // 블록 중간에 위치한 구문들 (instantiate! 만 처리)
-                    let converted = match stmt {
-                        syn::Stmt::Expr(e, _) => Some(convert_expr(e)),
-                        syn::Stmt::Macro(m) => {
-                            let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
-                            if mac_name == "instantiate" {
-                                if let Ok(inner) = syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
-                                    Some(Expr::Instantiate(Box::new(convert_expr(&inner))))
-                                } else { None }
-                            } else { None }
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(Expr::Instantiate(inner)) = converted {
-                        current_expr = Expr::Let {
-                            pat: Pattern::Wildcard,
-                            bound_expr: Box::new(Expr::Instantiate(inner)),
-                            body: Box::new(current_expr),
-                        };
-                    }
-                }
-            }
-            current_expr
-        }
+        SynExpr::Block(b) => convert_block(&b.block),
         SynExpr::Macro(m) => {
             let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
             
@@ -498,10 +421,108 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
     }
 }
 
+/// Converts a block `{ s1; s2; ...; tail }` into a chain of `Let` bindings.
+///
+/// A block is a sequence of statements followed by an optional tail expression,
+/// and its meaning is exactly sequential binding: each statement is evaluated,
+/// its result is bound (to a name for `let` statements, to nothing for bare
+/// expression statements), and the rest of the block continues under that
+/// binding. We therefore translate
+///
+/// ```text
+/// { let y = e1;  e2();  tail }   ==>   Let { y, e1, Let { _, e2(), tail } }
+/// ```
+///
+/// A final statement WITHOUT a trailing semicolon is the block's value (the
+/// tail). If the block ends with a semicolon-terminated statement, or has no
+/// statements at all, its value is the unit value, so the chain ends in an
+/// empty tuple. A block that is just `{ tail }` translates to the tail alone -
+/// no `Let` nodes are introduced.
+///
+/// `instantiate!(term)` in statement position records a proof hint; it is a
+/// unit-valued statement like any other and becomes an ordinary binding link.
+///
+/// Unsupported statement forms (`let` without an initializer, `let ... else`,
+/// nested item definitions, unknown statement macros) are rejected with a
+/// panic rather than skipped: silently ignoring a statement would make the
+/// verifier reason about a different program than the one on screen.
+fn convert_block(block: &syn::Block) -> Expr {
+    // Bound statements, in source order, plus the optional tail expression.
+    let mut links: Vec<(Pattern, Expr)> = Vec::new();
+    let mut tail: Expr = Expr::Tuple(vec![]);
+    let count = block.stmts.len();
+
+    for (idx, stmt) in block.stmts.iter().enumerate() {
+        let is_last = idx + 1 == count;
+        match stmt {
+            // `let <pat> = <expr>;`
+            syn::Stmt::Local(local) => {
+                let init = match &local.init {
+                    Some(init) => init,
+                    None => panic!(
+                        "`let` bindings without an initializer are not supported in verified bodies"
+                    ),
+                };
+                if init.diverge.is_some() {
+                    panic!("`let ... else` is not supported in verified bodies");
+                }
+                links.push((convert_pattern(&local.pat), convert_expr(&init.expr)));
+            }
+            // An expression statement. In the last position without a trailing
+            // semicolon it is the block's value; otherwise its value is bound
+            // to nothing and the block continues after it.
+            syn::Stmt::Expr(e, semi) => {
+                if is_last && semi.is_none() {
+                    tail = convert_expr(e);
+                } else {
+                    links.push((Pattern::Wildcard, convert_expr(e)));
+                }
+            }
+            // A macro invocation in statement position.
+            syn::Stmt::Macro(m) => {
+                let mac_name = m.mac.path.segments.last().unwrap().ident.to_string();
+                if mac_name == "instantiate" {
+                    match syn::parse2::<syn::Expr>(m.mac.tokens.clone()) {
+                        Ok(inner) => links.push((
+                            Pattern::Wildcard,
+                            Expr::Instantiate(Box::new(convert_expr(&inner))),
+                        )),
+                        Err(err) => {
+                            panic!("failed to parse the argument of instantiate!(..): {}", err)
+                        }
+                    }
+                } else {
+                    panic!(
+                        "unsupported statement macro `{}!` in a verified body",
+                        mac_name
+                    );
+                }
+            }
+            syn::Stmt::Item(_) => {
+                panic!("nested item definitions are not supported in verified bodies");
+            }
+        }
+    }
+
+    // Assemble the chain from the inside out: the last binding wraps the tail.
+    links
+        .into_iter()
+        .rev()
+        .fold(tail, |body, (pat, bound)| Expr::Let {
+            pat,
+            bound_expr: Box::new(bound),
+            body: Box::new(body),
+        })
+}
+
 pub fn convert_pattern(pat: &syn::Pat) -> Pattern {
     match pat {
         syn::Pat::Wild(_) => Pattern::Wildcard,
         syn::Pat::Ident(pi) => Pattern::Ident(pi.ident.to_string()),
+        // A type-annotated pattern, e.g. `let y: Nat = ...`. The annotation adds
+        // no information the checker doesn't already infer from the initializer,
+        // so only the inner pattern matters here.
+        syn::Pat::Type(pt) => convert_pattern(&pt.pat),
         syn::Pat::TupleStruct(pts) => {
             let ident = pts.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>().join("::");
             let args = pts.elems.iter().map(convert_pattern).collect();
