@@ -70,21 +70,18 @@ fn relabs(expr: &Expr, is_pos: bool, global_specs: &HashMap<Ident, FunctionDef>)
                 // 생성자 호출 (Constructor(args))
                 Expr::Constructor { name, args } => {
                     if args.is_empty() {
-                        // [KOR] 인자가 없는 생성자는 관계식으로 쪼개지 않고 상수로 치환합니다!
-                        //       let v = Nat::Z in body  =>  body[Nat::Z / v] 처럼 바인딩을 제거하고 
-                        //       바로 내부를 변환하도록 할 수도 있지만, 
-                        //       여기서는 SMT-LIB에 친화적인 상수 식별자로 바꿔서 Let 구조를 유지하거나 치환합니다.
-                        //       간단히 `body` 내부의 `var_name`을 상수로 치환하고 RelAbs를 계속 진행하는 것이 가장 깔끔합니다.
+                        // A constructor with no arguments denotes a constant (it is
+                        // declared as one for the solver). Binding a variable to a
+                        // constant introduces no relation, and the final translation
+                        // stage accepts no Let nodes -- so replace the variable by
+                        // the constant everywhere in the body and drop the binding.
                         let const_name = name.replace("::", "__");
-                        
-                        // 임시 헬퍼: AST 치환 (frontend::env::substitute_expr 재사용 가능하지만, 백엔드 의존성 분리를 위해 간단히 놔둠)
-                        // 사실상 ANF 단계에서 인자 없는 생성자는 let 바인딩을 아예 안 하도록 고칠 것이기 때문에,
-                        // 만약 여기까지 왔다면 그냥 Let을 유지하되 bound_expr를 Var로 바꿔줍니다.
-                        Expr::Let {
-                            pat: pat.clone(),
-                            bound_expr: Box::new(Expr::Var(const_name)),
-                            body: Box::new(relabs(body, is_pos, global_specs)),
-                        }
+                        let inlined = frontend::env::substitute_expr(
+                            body,
+                            &var_name,
+                            &Expr::Var(const_name),
+                        );
+                        relabs(&inlined, is_pos, global_specs)
                     } else {
                         // 인자가 있는 생성자는 기존처럼 관계식으로 변환
                         transform_call_to_rel(
@@ -108,7 +105,27 @@ fn relabs(expr: &Expr, is_pos: bool, global_specs: &HashMap<Ident, FunctionDef>)
                         global_specs
                     )
                 }
-                // 논리 상수나 단순 튜플 생성 등은 관계식으로 쪼갤 필요 없이 그대로 유지
+                // A binding whose right-hand side is already an atomic value
+                // carries no relational content, and the final translation stage
+                // accepts no Let nodes -- inline the value into the body and drop
+                // the binding. Such bindings arise when the flattening stage names
+                // the result of an inner expression and a source-level `let` then
+                // aliases that name (e.g. `let y = S(x); ...` flattens to
+                // `let anf_0 = S(x) in let y = anf_0 in ...`).
+                Expr::Var(alias) if alias.starts_with("anf_") => {
+                    // Names produced by the flattening stage are globally unique,
+                    // so this substitution can never capture anything.
+                    let inlined =
+                        frontend::env::substitute_expr(body, &var_name, &Expr::Var(alias.clone()));
+                    relabs(&inlined, is_pos, global_specs)
+                }
+                Expr::BoolConst(_) => {
+                    let inlined =
+                        frontend::env::substitute_expr(body, &var_name, bound_expr);
+                    relabs(&inlined, is_pos, global_specs)
+                }
+                // Anything else (e.g. tuples) is kept; the final translation stage
+                // will report it loudly if it cannot be encoded.
                 _ => {
                     Expr::Let {
                         pat: pat.clone(),
