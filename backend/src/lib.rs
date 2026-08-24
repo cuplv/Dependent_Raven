@@ -6,3 +6,4 @@ pub mod skolemize;
 pub mod relabs;
 pub mod epr_check;
 pub mod smt;
+pub mod cex;

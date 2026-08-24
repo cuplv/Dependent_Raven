@@ -40,7 +40,7 @@ fn extract_pat_binders(pat: &Pattern, ty: &BaseType, binders: &mut Vec<(String, 
 
 /// [KOR] 함수의 시그니처에서 인자 타입 목록과 반환 타입을 추출합니다.
 /// [ENG] Extracts the list of argument types and the return type from a function's signature.
-fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
+pub(crate) fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
     let mut inputs = Vec::new();
     while let Type::Arrow(f) = ty {
         let base = match &*f.param_type {
@@ -329,9 +329,33 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
 
         match ctx.check().unwrap() {
             easy_smt::Response::Sat => {
+                // [KOR] 반례 파일을 소스 어휘로 방출합니다. 방출 실패가 검증 실패
+                //       보고 자체를 가리면 안 되므로, 에러는 경고로만 출력합니다.
+                // [ENG] Emit the counterexample file in source vocabulary. Emission
+                //       failure must never mask the verification failure itself,
+                //       so its error is only printed as a warning.
+                let cex_path = format!("logs/{}_counterexample.smt2", goal_name);
+                if let Some(src_goal) = program.goals.iter().find(|g| g.name == goal_name) {
+                    // [KOR] 방출기 내부의 불변식 panic도 경고로 낮춥니다.
+                    // [ENG] Invariant panics inside the emitter are also
+                    //       downgraded to warnings.
+                    let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::cex::emit(&program, src_goal, &cex_path)
+                    }));
+                    match emitted {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            println!("  ⚠️ Failed to write counterexample {}: {}", cex_path, e)
+                        }
+                        Err(_) => println!(
+                            "  ⚠️ Counterexample generation panicked; {} was not written",
+                            cex_path
+                        ),
+                    }
+                }
                 return Err(format!(
-                    "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}", 
-                    goal_name, smt_log_path
+                    "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}\n## > 💾 Counterexample: {}",
+                    goal_name, smt_log_path, cex_path
                 ));
             }
             easy_smt::Response::Unknown => {
