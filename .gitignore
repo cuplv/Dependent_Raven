@@ -1,3 +1,4 @@
 logs/
 test_suite/logs/
-/target/.DS_Store
+/target/
+.DS_Store
