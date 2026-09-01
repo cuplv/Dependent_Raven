@@ -425,7 +425,14 @@ fn generate_axioms_from_body(
             // Remove the original matched variable from the binders, as it is now instantiated
             new_binders.retain(|(n, _)| n != &matched_var);
 
-            // Update the arguments map: substitute the matched variable with the pattern expression
+            // Update the arguments map: substitute the matched variable with the pattern expression.
+            // The substitution must also reach the EXISTING map values: when the matched
+            // variable was itself bound by an enclosing pattern (e.g. matching on `t` after
+            // `xs` matched `Cons(h, t)`), the accumulated entry `xs -> Cons(h, t)` still
+            // mentions it, and leaving it unsubstituted would emit an axiom with a free `t`.
+            for val in new_args_map.values_mut() {
+                *val = frontend::env::substitute_expr(val, &matched_var, &pat_expr);
+            }
             new_args_map.insert(matched_var.clone(), pat_expr.clone());
 
             // CRUCIAL: Substitute occurrences of the matched variable with the pattern expression
