@@ -105,21 +105,27 @@ pub fn print_definitions(program: &Program, funcs: &BTreeSet<String>) -> String 
         };
         let params = param_names(&def.signature);
         for branch in decompose_body(body) {
-            // [KOR] 브랜치 안에서 매칭된 파라미터는 곧 그 패턴입니다. 우변에
-            //       남아 있는 매칭 파라미터(예: sub의 `Z => x`의 x)를 패턴으로
-            //       치환해야 좌변과 같은 어휘로 읽힙니다: sub(S(x_min), Z) = S(x_min).
-            // [ENG] Inside a branch, a matched parameter IS its pattern. A
-            //       matched parameter surviving in the rhs (e.g. the x of
-            //       sub's `Z => x` arm) is substituted by its pattern so the
-            //       line reads in the same vocabulary as its left-hand side:
-            //       sub(S(x_min), Z) = S(x_min).
-            let subst: Vec<(Ident, String)> = branch
-                .bindings
-                .iter()
-                .map(|(p, pat)| (p.clone(), render_pattern(pat)))
-                .collect();
+            // [KOR] 브랜치 안에서 매칭된 변수는 곧 그 패턴입니다. 나중 바인딩이
+            //       앞선 패턴의 변수를 더 쪼갤 수 있으므로(예: Cons(h, t)의 t를
+            //       다시 Nil로 매칭) 바인딩을 뒤에서 앞으로 렌더링해, 앞선 패턴
+            //       안의 변수가 최종 모양으로 나타나게 합니다:
+            //       sorted(Cons(h, Nil)) = true. 같은 치환이 우변에 남은 매칭
+            //       변수(sub의 `Z => x`의 x 등)에도 적용됩니다.
+            // [ENG] Inside a branch, a matched variable IS its pattern. A later
+            //       binding may refine a variable bound by an earlier pattern
+            //       (e.g. the t of Cons(h, t) matched again as Nil), so the
+            //       bindings are rendered back to front, letting variables
+            //       inside earlier patterns appear in their final shape:
+            //       sorted(Cons(h, Nil)) = true. The same substitution covers
+            //       matched variables surviving in the rhs (e.g. the x of
+            //       sub's `Z => x` arm).
+            let mut subst: Vec<(Ident, String)> = Vec::new();
+            for (p, pat) in branch.bindings.iter().rev() {
+                let rendered = render_pattern(pat, &subst);
+                subst.push((p.clone(), rendered));
+            }
             lines.push((
-                render_lhs(func, &params, &branch.bindings),
+                render_lhs(func, &params, &subst),
                 render_expr(&branch.rhs, &subst),
             ));
         }
@@ -150,32 +156,39 @@ fn param_names(mut ty: &Type) -> Vec<Ident> {
     names
 }
 
-/// [KOR] 브랜치의 좌변을 만듭니다: 매칭된 파라미터는 패턴으로, 나머지는
-///       이름 그대로. 예: `sub(S(x_min), Z)`.
-/// [ENG] Builds the branch's left-hand side: matched parameters shown as
-///       their patterns, the rest by name. E.g. `sub(S(x_min), Z)`.
-fn render_lhs(func: &str, params: &[Ident], bindings: &[(Ident, Pattern)]) -> String {
+/// [KOR] 브랜치의 좌변을 만듭니다: 매칭된 파라미터는 (완전히 정제된) 패턴
+///       렌더링으로, 나머지는 이름 그대로. 예: `sub(S(x_min), Z)`.
+/// [ENG] Builds the branch's left-hand side: matched parameters shown by
+///       their (fully refined) pattern rendering, the rest by name.
+///       E.g. `sub(S(x_min), Z)`.
+fn render_lhs(func: &str, params: &[Ident], subst: &[(Ident, String)]) -> String {
     let rendered: Vec<String> = params
         .iter()
-        .map(|p| {
-            match bindings.iter().find(|(matched, _)| matched == p) {
-                Some((_, pat)) => render_pattern(pat),
-                None => p.clone(),
-            }
+        .map(|p| match subst.iter().find(|(matched, _)| matched == p) {
+            Some((_, pattern)) => pattern.clone(),
+            None => p.clone(),
         })
         .collect();
     format!("{}({})", func, rendered.join(", "))
 }
 
-fn render_pattern(pat: &Pattern) -> String {
+/// [KOR] 패턴을 렌더링하되, 나중 match가 더 쪼갠 변수(`subst`에 있는 것)는
+///       그 최종 모양으로 바꿉니다.
+/// [ENG] Renders a pattern, replacing variables a later match refined
+///       (those in `subst`) by their final shape.
+fn render_pattern(pat: &Pattern, subst: &[(Ident, String)]) -> String {
     match pat {
         Pattern::Wildcard => "_".to_string(),
-        Pattern::Ident(name) => name.clone(),
+        Pattern::Ident(name) => match subst.iter().find(|(p, _)| p == name) {
+            Some((_, refined)) => refined.clone(),
+            None => name.clone(),
+        },
         Pattern::Constructor { name, args, .. } => {
             if args.is_empty() {
                 variant_name(name).to_string()
             } else {
-                let rendered: Vec<String> = args.iter().map(render_pattern).collect();
+                let rendered: Vec<String> =
+                    args.iter().map(|a| render_pattern(a, subst)).collect();
                 format!("{}({})", variant_name(name), rendered.join(", "))
             }
         }
