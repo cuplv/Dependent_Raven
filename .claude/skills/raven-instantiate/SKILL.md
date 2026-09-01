@@ -21,9 +21,11 @@ tests. Never weaken a spec, never comment out a property, never mark a
 test ignored. If no permitted edit can succeed, the correct output is a
 description of the final state, not a forced green test.
 
-This constraint is ENFORCED, not just stated: procedure step 4 requires a
-`git diff` self-audit after every edit, and any non-`instantiate!` change
-must be reverted on the spot.
+The constraint always applies. A mechanical `git diff` self-audit is
+available as an OPTIONAL verification layer: perform it when the user asks
+for an audited run, or on your own initiative whenever you are unsure an
+edit stayed inside the envelope (see step 4). By default, simply follow
+the constraint.
 
 Adding hints is always sound (a hint is a true totality fact about the
 real functions — `reference/theory.md`, Fact 1), so the risk of an edit is
@@ -77,9 +79,12 @@ silently vacuous. Why this is so is visible in the query text: see
    - candidates = result terms absent from the ledger. Prefer the
      outermost missing term (a deep hint switches all its subterms).
 
-4. **Edit, self-audit, re-run.** Add ALL of the round's candidates as
+4. **Edit and re-run.** Add ALL of the round's candidates as
    `instantiate!` lines in the failing branch, before the tail/recursive
-   call (syntax: §6). Then AUDIT the edit before running anything:
+   call (syntax: §6), then re-run the test.
+
+   *Optional self-audit* — do this when the user requested an audited run,
+   or whenever you are unsure an edit stayed inside §1's envelope:
 
    ```
    git diff -- test_suite/tests/<file>.rs
@@ -87,10 +92,11 @@ silently vacuous. Why this is so is visible in the query text: see
 
    Every `+` line must match `instantiate!( ... );` (whitespace aside) and
    there must be NO `-` lines except `instantiate!` lines you yourself
-   added in an earlier round. If the diff shows anything else — a changed
-   spec, a touched definition, a reordered statement — revert that change
-   immediately before proceeding. Only after a clean audit, re-run the
-   test.
+   added in an earlier round. Anything else — a changed spec, a touched
+   definition, a reordered statement — must be reverted immediately.
+   (The audit only sees TRACKED files; if the failing test file is a
+   freshly copied, untracked fixture, `git add` it first or the diff is
+   silently empty.)
 
 5. **Loop or finish.**
    - Green: minimize — remove each added hint in turn, keep only those
