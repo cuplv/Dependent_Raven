@@ -431,6 +431,45 @@ pub fn check_expr(
             }
         }
         
+        // ---------------------------------------------------------
+        // [T-IF]: if-then-else (Checking Mode)
+        // ---------------------------------------------------------
+        // An `if` in a proof body splits the proof in two, the same way a
+        // match splits it by constructor shape. Each branch is checked
+        // against the same expected type inside its own scope, with the
+        // guard recorded as a path condition: the then-branch may assume
+        // the condition holds, the else-branch may assume its negation.
+        // Checking the branches (instead of synthesizing them, as the
+        // fallback below would) is what allows a `match` to appear inside
+        // an `if` branch -- match is only implemented in checking mode --
+        // so a proof can split on a guard first and on a constructor
+        // shape second, mirroring function bodies that interleave the two.
+        Expr::If { cond, then_expr, else_expr } => {
+            // The condition must be Bool. Synthesizing it also lets any
+            // calls inside it contribute their own verification conditions.
+            let cond_type = synthesize_expr(env, cond, global_specs, vcs);
+            let base_cond = match cond_type {
+                Type::Base(b) | Type::Refined(RefinedType { base: b, .. }) => b,
+                _ => panic!("Condition must be a base type (Bool)"),
+            };
+            if base_cond != BaseType::Bool {
+                panic!("Condition of if-expression must be Bool");
+            }
+
+            env.with_scope(|inner_env| {
+                inner_env.add_path_condition((**cond).clone());
+                check_expr(inner_env, then_expr, expected, global_specs, vcs);
+            });
+
+            env.with_scope(|inner_env| {
+                inner_env.add_path_condition(Expr::UnOp {
+                    op: UnOp::Not,
+                    expr: cond.clone(),
+                });
+                check_expr(inner_env, else_expr, expected, global_specs, vcs);
+            });
+        }
+
         // Checking fallback: 만약 Match 등 명시적인 하향식 제어 구문이 아니라면,
         // 상향식으로 추론(Synthesize)한 뒤, 그 결과가 expected의 서브타입인지 검사합니다.
         // [KOR] Subtyping 규칙의 진입점입니다!
