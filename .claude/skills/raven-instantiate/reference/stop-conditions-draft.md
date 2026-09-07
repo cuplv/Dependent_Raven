@@ -36,6 +36,12 @@ Soundness of this stop: when the frontier is saturated and the query is
 still sat, no instantiation set whatsoever can close the VC
 (`theory.md`, Fact 3) — declining is correct, not a give-up.
 
+Caveat for user-imposed limits: if an `unroll-limit` (per-function;
+SKILL.md §5) is active, Stop 1 requires the frontier to be empty even
+IGNORING frozen functions. A frontier emptied only by the limit is LIMITED
+saturation and licenses no missing-lemma diagnosis — report the capped
+state instead.
+
 **Stop 2 — progress rule (not a fixed round budget).** Continue while each
 round adds at least one candidate never previously added. Rounds are
 naturally bounded by the constructor depth visible in the goal, hints, and

@@ -124,6 +124,20 @@ A designed (inactive) stop-condition scheme exists at
 `reference/stop-conditions-draft.md`; do NOT apply it — the point of this
 mode is to observe behavior without it.
 
+**User-imposed unroll limit (optional, keyword: `unroll-limit`).** There
+is NO default limit of any kind. But if the invocation specifies one
+(e.g. "/raven-instantiate — unroll-limit 2"), honor it as a PER-FUNCTION
+limit: track,
+for each function, how many one-step unfoldings of its definition you
+have performed across all rounds of this VC; once a function reaches the
+limit, freeze it — propose no further candidates that require unfolding
+it. If the proof cannot close under the restriction, report the capped
+state: the per-function unfold counts, the unfoldings the limit blocked,
+and the last frontier table. A frontier that is empty only because of
+frozen functions is LIMITED saturation — it licenses no conclusion about
+the failure's nature (the blocked unfoldings might have closed the
+proof); say so explicitly, and never present it as exhaustion.
+
 ## 6. Edit conventions (top three; rest in `reference/proof-language.md`)
 
 - `instantiate!` contents are RECORDED, not compiled: no `Box::new`, no
