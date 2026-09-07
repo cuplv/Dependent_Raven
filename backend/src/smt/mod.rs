@@ -335,6 +335,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 //       failure must never mask the verification failure itself,
                 //       so its error is only printed as a warning.
                 let cex_path = format!("logs/{}_counterexample.smt2", goal_name);
+                let mut cex_written = false;
                 if let Some(src_goal) = program.goals.iter().find(|g| g.name == goal_name) {
                     // [KOR] 방출기 내부의 불변식 panic도 경고로 낮춥니다.
                     // [ENG] Invariant panics inside the emitter are also
@@ -343,7 +344,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                         crate::cex::emit(&program, src_goal, &cex_path)
                     }));
                     match emitted {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => cex_written = true,
                         Ok(Err(e)) => {
                             println!("  ⚠️ Failed to write counterexample {}: {}", cex_path, e)
                         }
@@ -353,9 +354,15 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                         ),
                     }
                 }
+                // Only advertise the counterexample file if it was actually written.
+                let cex_line = if cex_written {
+                    format!("\n## > 💾 Counterexample: {}", cex_path)
+                } else {
+                    String::new()
+                };
                 return Err(format!(
-                    "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}\n## > 💾 Counterexample: {}",
-                    goal_name, smt_log_path, cex_path
+                    "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}{}",
+                    goal_name, smt_log_path, cex_line
                 ));
             }
             easy_smt::Response::Unknown => {
