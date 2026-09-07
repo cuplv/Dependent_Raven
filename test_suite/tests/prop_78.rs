@@ -1,11 +1,11 @@
-// TIP IsaPlanner prop_77: sorted(xs) ==> sorted(insort(x, xs))
+// TIP IsaPlanner prop_78: sorted(sort(xs))
 //
-// The first property with an IMPLICATION goal, written with the parser's
-// implies(p, q) form. The proof mixes every ingredient: a conditional
-// helper lemma (le_neg: from !le(x, y) conclude le(y, x)), guard case
-// splits in the proof body (if le(..)), a nested match to expose the head
-// of the tail (sorted's equations need the first TWO elements), and
-// instantiations naming the lists insort builds.
+// The sorting-cluster flagship, and the canonical two-level lemma chain:
+// tip_78 leans on sorted_insort (insertion preserves sortedness -- the
+// prop_77 lemma), whose own proof leans on le_neg (totality of le). The
+// top proof itself is tiny: one helper call at (h, sort(t)) plus the
+// induction hypothesis; sort's defining equation and functionality do
+// the rest.
 #[ravencheck::module]
 mod tip_benchmarks {
 
@@ -52,6 +52,15 @@ mod tip_benchmarks {
 
     #[val]
     #[recursive]
+    fn sort(xs: NList) -> NList {
+        match xs {
+            NList::Nil => NList::Nil,
+            NList::Cons(h, t) => insort(h, sort(*t)),
+        }
+    }
+
+    #[val]
+    #[recursive]
     fn sorted(xs: NList) -> bool {
         match xs {
             NList::Nil => true,
@@ -68,7 +77,7 @@ mod tip_benchmarks {
         }
     }
 
-    // Helper: le is total -- if x is not below y, then y is below x.
+    // Helper (depth 2): le is total -- if x is not below y, y is below x.
     #[val((x: Nat, y: Nat) -> Lemma(implies(!le(x, y), le(y, x))))]
     fn le_neg(x: Nat, y: Nat) {
         match x {
@@ -80,21 +89,16 @@ mod tip_benchmarks {
         }
     }
 
-    // The guard case split on le(x, h) is left to the solver: the hints for
-    // BOTH insort outcomes are supplied unconditionally, and le_neg's gated
-    // postcondition (le(h, x)) engages exactly when the guard is false.
+    // Helper (depth 1): insertion preserves sortedness (TIP prop_77).
     #[val((x: Nat, xs: NList) -> Lemma(implies(sorted(xs), sorted(insort(x, xs)))))]
-    fn tip_77(x: Nat, xs: NList) {
+    fn sorted_insort(x: Nat, xs: NList) {
         match xs {
             NList::Nil => {
-                // insort(x, Nil) builds Cons(x, Nil); name it and its sortedness.
                 instantiate!(sorted(NList::Cons(x, NList::Nil)));
             }
             NList::Cons(h, t) => {
                 le_neg(x.clone(), h.clone());
-                // Guard-true outcome: insort puts x in front.
                 instantiate!(NList::Cons(x, NList::Cons(h, t)));
-                // Guard-false outcome: insort walks past h.
                 instantiate!(NList::Cons(h, insort(x, t)));
                 match *t.clone() {
                     NList::Nil => {
@@ -105,9 +109,20 @@ mod tip_benchmarks {
                         instantiate!(le(x, h2));
                         instantiate!(sorted(NList::Cons(x, NList::Cons(h2, t2))));
                         instantiate!(sorted(NList::Cons(h2, insort(x, t2))));
-                        tip_77(x.clone(), *t.clone());
+                        sorted_insort(x.clone(), *t.clone());
                     }
                 }
+            }
+        }
+    }
+
+    #[val((xs: NList) -> Lemma(sorted(sort(xs))))]
+    fn tip_78(xs: NList) {
+        match xs {
+            NList::Nil => (),
+            NList::Cons(h, t) => {
+                sorted_insort(h.clone(), sort(*t.clone()));
+                tip_78(*t)
             }
         }
     }
