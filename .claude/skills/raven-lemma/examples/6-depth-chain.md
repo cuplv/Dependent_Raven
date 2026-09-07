@@ -102,7 +102,8 @@ tip_78  ->  sorted_insort        NEW conjecture: depth 1
 
 Calling a proven lemma costs no depth — depth counts stacked UNPROVEN
 conjectures only. Had `le_neg` also been missing, its construction
-inside `sorted_insort`'s proof would open depth 2 — the budget's limit.
+inside `sorted_insort`'s proof would open depth 2 (the default budget
+is 3; overridable via `depth-limit N`).
 
 The helper (guard-split proof over the tail's shape; its internal hints
 are the instantiate-composition product of its own branches) and the
@@ -150,5 +151,5 @@ once the helper call's postcondition mentions the same term. Removed:
 still green — the final Cons branch is exactly two calls, no hints.
 
 Report: one new lemma (preservation signature, conditional), depth used
-1 of 2; one call at an expression instance; le_neg reused at depth 0;
+1 of 3; one call at an expression instance; le_neg reused at depth 0;
 one stale hint removed.

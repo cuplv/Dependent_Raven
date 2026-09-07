@@ -119,10 +119,18 @@ into the helper is normal (it is the composition trigger, §5).
 - **L1 — no validated candidate.** 2-3 probes all `sat` -> report the
   tried candidates with verdicts and the classification evidence.
   (Criterion and template: `reference/pre-validation.md`.)
-- **L2 — budgets.** Lemma-DEPTH limit 2 (a sub-helper needing its own
-  sub-helper -> stop, report the conjecture chain for review).
-  Lemma-COUNT limit 4 per session (beyond it, report the plan, not the
-  pile). Budget stops report state; they NEVER conclude "unprovable".
+- **L2 — budgets.** Lemma-DEPTH limit, default 3 (a conjecture chain
+  growing past three unproven levels -> stop, report the chain for
+  review).
+  Lemma-COUNT limit, default 4 per session (beyond it, report the plan,
+  not the pile). Both are overridable by invocation keywords —
+  `depth-limit N` and `lemma-limit N` (e.g. "/raven-lemma — depth-limit
+  4 lemma-limit 10" for proofs beyond TIP scale, such as BST/AVL/RBT
+  properties). Overrides change the numbers, never the semantics:
+  budget stops report state; they NEVER conclude "unprovable". Both
+  budgets count only UNPROVEN conjectures created this session —
+  already-proven lemmas are free, so large lemma libraries are built by
+  staged sessions rather than raised limits where possible.
 - **L3 — fragment rejection.** The tool's sort-cycle/fragment error
   survives one reformulation pass -> report the attempt list.
   (Criterion and template: `reference/epr-fitting.md`.)
