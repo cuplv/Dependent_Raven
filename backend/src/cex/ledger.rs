@@ -24,7 +24,7 @@
 //! (goal > hypotheses > patterns > hints), keeping the query's
 //! instantiation order within a group.
 
-use frontend::ast::{BinOp, Expr};
+use frontend::ast::{BinOp, Expr, UnOp};
 use frontend::auto_inst::collect_ground_terms;
 
 use super::dissect::{Core, Hypothesis, VcParts};
@@ -127,6 +127,27 @@ fn render_fact(fact: &Expr) -> String {
             left,
             right,
         } => format!("{} == {}", print_term(left), print_term(right)),
+        Expr::BinOp {
+            op: BinOp::Neq,
+            left,
+            right,
+        } => format!("{} != {}", print_term(left), print_term(right)),
+        // A negated fact (e.g. the gate of le_neg's postcondition
+        // implies(!le(x, y), le(y, x))) is a formula, not a term --
+        // handle it here so the term printer never sees it. A negated
+        // EQUALITY is written as != (a bare "!a == b" would read as
+        // (!a) == b).
+        Expr::UnOp {
+            op: UnOp::Not,
+            expr,
+        } => match &**expr {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => format!("{} != {}", print_term(left), print_term(right)),
+            inner => format!("!{}", render_fact(inner)),
+        },
         other => print_term(other),
     }
 }

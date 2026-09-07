@@ -196,6 +196,33 @@ fn math_fact(fact: &Expr) -> String {
             defs::render_expr(left, &[]),
             defs::render_expr(right, &[])
         ),
+        Expr::BinOp {
+            op: BinOp::Neq,
+            left,
+            right,
+        } => format!(
+            "{} != {}",
+            defs::render_expr(left, &[]),
+            defs::render_expr(right, &[])
+        ),
+        // Negated facts are formulas; keep them away from the term
+        // renderer. A negated equality is written as != (a bare
+        // "!a == b" would read as (!a) == b).
+        Expr::UnOp {
+            op: frontend::ast::UnOp::Not,
+            expr,
+        } => match &**expr {
+            Expr::BinOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => format!(
+                "{} != {}",
+                defs::render_expr(left, &[]),
+                defs::render_expr(right, &[])
+            ),
+            inner => format!("!{}", math_fact(inner)),
+        },
         other => defs::render_expr(other, &[]),
     }
 }
@@ -211,6 +238,20 @@ fn holding_fact_sexpr(fact: &Expr) -> String {
             left,
             right,
         } => format!("(= {} {})", print::print_term(left), print::print_term(right)),
+        Expr::BinOp {
+            op: BinOp::Neq,
+            left,
+            right,
+        } => format!(
+            "(distinct {} {})",
+            print::print_term(left),
+            print::print_term(right)
+        ),
+        // A negated fact holds when its inner fact does not.
+        Expr::UnOp {
+            op: frontend::ast::UnOp::Not,
+            expr,
+        } => format!("(not {})", holding_fact_sexpr(expr)),
         other => format!("(= {} true)", print::print_term(other)),
     }
 }
