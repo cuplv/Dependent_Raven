@@ -373,7 +373,12 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             }
             easy_smt::Response::Unsat => {
                 // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
-                let _ = fs::remove_file(&smt_log_path);
+                // Set RAVENCHECK_KEEP_QUERIES to keep the query of a verified goal
+                // (to inspect a passing VC's query, or to measure query sizes and
+                // solver times). The file keeps its replay-file name.
+                if std::env::var("RAVENCHECK_KEEP_QUERIES").is_err() {
+                    let _ = fs::remove_file(&smt_log_path);
+                }
                 println!(
                     "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
                     goal_name
