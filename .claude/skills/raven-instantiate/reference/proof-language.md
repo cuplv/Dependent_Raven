@@ -33,7 +33,14 @@ axioms.
 - Equality goal: `Lemma(sub(add(m, n), n) == m)`
 - Bare-predicate goal: `Lemma(eq_nat(x, x))`
 - Implication goal: `Lemma(implies(le(m, n), le(m, Nat::S(Box::new(n)))))`
-  — `implies(p, q)` is the ONLY spelling (Rust has no `==>`), and it nests.
+  — `implies(p, q)` (Rust has no `==>`); it nests.
+- Precondition form: `Lemma(requires(le(m, n)), ensures(...))` — the
+  precondition becomes the LAST argument's refinement. Equivalent for the
+  lemma's own proof, but different at CALL sites: a requires-lemma
+  obliges every caller to prove the precondition there (its fact then
+  enters ungated), while an implies-lemma may be called unconditionally
+  (its fact enters gated). The unconditional-call pattern (supplying
+  both guard outcomes' facts) needs the implies form.
 - Boxing: spec text must parse as a Rust expression, so boxed constructor
   fields need `Box::new` in specs: `Nat::S(Box::new(add(i, m)))`. The
   parser strips the Box.
@@ -91,11 +98,13 @@ The contents are RECORDED, not compiled as Rust:
    (`Nat::S(_b_min)`); bare wildcards panic the backend.
 3. A match target must be a simple variable; to match a boxed tail write
    `match *t.clone() { ... }`.
-4. Do NOT nest a `match` inside an `if` branch of a proof body (known
-   frontend gap: panics with "T-MATCH ... Checking Mode"). When a guard
-   split and a shape split are both needed, put the `match` outside and
-   supply BOTH guard-outcomes' facts unconditionally — the solver splits on
-   the guard internally.
+4. A `match` inside an `if` branch of a proof body is supported (the
+   checking-mode If rule; `tests/if_match_proof.rs` is the regression
+   test): split on the guard first, then on the shape, each branch
+   carrying only its own facts. The older style — `match` outside and
+   BOTH guard-outcomes' facts supplied unconditionally, letting the solver
+   split on the guard internally — still works and appears in committed
+   proofs (prop_77), but is no longer necessary.
 5. After `match *t.clone()`, the original `t` is still usable; clone before
    moves generally — when in doubt, `.clone()` is always safe in proof
    bodies (they are erased logically).
