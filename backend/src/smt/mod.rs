@@ -10,7 +10,10 @@ use crate::anf::{transform_expr as anf_transform, NameGenerator};
 use crate::epr_check::{check_for_cycles, render_cycle};
 use crate::nnf::transform_expr as nnf_transform;
 use crate::relabs::transform_expr as relabs_transform;
-use crate::smt::axioms::{disjointness_axiom, functionality_axiom, injectivity_axiom};
+use crate::smt::axioms::{
+    disjointness_axiom, functionality_axiom, injectivity_axiom, subterm_irreflexivity_axiom,
+    subterm_step_axiom, subterm_transitivity_axiom,
+};
 use crate::smt::builder::{expr_to_smt, render_sort, sanitize_id};
 use crate::smt::solver::SolverConfig;
 use frontend::ast::{BaseType, BinOp, Expr, Ident, Pattern, Program, Type, UnOp};
@@ -175,6 +178,19 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // 3.2. 데이터 생성자 (Constructors) 및 공리 선언
         for (enum_name, variants) in &program.datatypes {
             let out_type = BaseType::Custom(enum_name.clone());
+
+            // [KOR] 부분항 순서(subterm) 관계: 재귀 필드(자기 sort의 필드)를 가진 datatype에만 선언합니다.
+            // [ENG] Subterm order relation, declared only for datatypes with a recursive field.
+            let has_recursive_field = variants
+                .iter()
+                .any(|(_, args)| args.iter().any(|ty| *ty == out_type));
+            let sub_rel = sanitize_id(&format!("{}::subterm", enum_name));
+            if has_recursive_field {
+                let sub_args = vec![ctx.atom(render_sort(&out_type)), ctx.atom(render_sort(&out_type))];
+                ctx.declare_fun(sub_rel.clone(), sub_args, ctx.atom("Bool"))
+                    .unwrap();
+            }
+
             for (cons_name, arg_types) in variants {
                 if arg_types.is_empty() {
                     // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
@@ -205,6 +221,16 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                     let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
                     let inj_ax_smt = expr_to_smt(&mut ctx, &inj_ax).unwrap();
                     ctx.assert(inj_ax_smt).unwrap();
+
+                    // Subterm Step Axiom: each recursive field is a proper subterm of the result.
+                    for (i, ty) in arg_types.iter().enumerate() {
+                        if *ty == out_type {
+                            let step_ax =
+                                subterm_step_axiom(&rel_name, arg_types, i, &sub_rel, &out_type);
+                            let step_ax_smt = expr_to_smt(&mut ctx, &step_ax).unwrap();
+                            ctx.assert(step_ax_smt).unwrap();
+                        }
+                    }
                 }
             }
 
@@ -218,6 +244,19 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                         disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
                     let disj_ax_smt = expr_to_smt(&mut ctx, &disj_ax).unwrap();
                     ctx.assert(disj_ax_smt).unwrap();
+                }
+            }
+
+            // Subterm order: transitive and irreflexive. With the step facts this
+            // excludes every finite constructor cycle (acyclicity), using only
+            // universal quantifiers, so the EPR fragment is preserved.
+            if has_recursive_field {
+                for ax in [
+                    subterm_transitivity_axiom(&sub_rel, &out_type),
+                    subterm_irreflexivity_axiom(&sub_rel, &out_type),
+                ] {
+                    let ax_smt = expr_to_smt(&mut ctx, &ax).unwrap();
+                    ctx.assert(ax_smt).unwrap();
                 }
             }
         }

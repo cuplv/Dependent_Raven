@@ -3,7 +3,7 @@
 //! 생성자(Constructor)와 함수(Function)가 수학적으로 올바르게 동작하도록
 //! 함수성(Functionality), 단사성(Injectivity), 분리성(Disjointness) 공리를 Expr 형태로 생성합니다.
 
-use frontend::ast::{Expr, BinOp, BaseType, Ident};
+use frontend::ast::{Expr, BinOp, UnOp, BaseType, Ident};
 
 /// [KOR] 관계식에 사용할 고유 변수 이름을 생성하는 헬퍼 함수
 /// [ENG] Helper function to generate unique variable names for relations
@@ -237,5 +237,90 @@ pub fn disjointness_axiom(
                 })
             }
         }
+    }
+}
+
+/// [KOR] Subterm Step Axiom (부분항 단계 공리) 생성
+///       생성자의 재귀 필드(자기 sort의 필드)는 결과의 진부분항입니다.
+///       ∀ in_0.., res. C_rel(in_0.., res) ⟹ subterm(in_i, res)
+/// [ENG] Generates the subterm step axiom for one recursive field of a constructor:
+///       the field value is a proper subterm of the constructed value.
+pub fn subterm_step_axiom(
+    cons_rel: &str,
+    input_types: &[BaseType],
+    field_idx: usize,
+    sub_rel: &str,
+    output_type: &BaseType,
+) -> Expr {
+    let mut binders = Vec::new();
+    let mut rel_args = Vec::new();
+
+    for (i, ty) in input_types.iter().enumerate() {
+        let v = var_name("in", i);
+        binders.push((v.clone(), ty.clone()));
+        rel_args.push(Expr::Var(v));
+    }
+
+    let r = "res".to_string();
+    binders.push((r.clone(), output_type.clone()));
+    rel_args.push(Expr::Var(r.clone()));
+
+    let condition = Expr::ApplyRel { relation: cons_rel.to_string(), args: rel_args };
+    let conclusion = Expr::ApplyRel {
+        relation: sub_rel.to_string(),
+        args: vec![Expr::Var(var_name("in", field_idx)), Expr::Var(r)],
+    };
+
+    Expr::Forall {
+        binders,
+        body: Box::new(Expr::BinOp {
+            op: BinOp::Implies,
+            left: Box::new(condition),
+            right: Box::new(conclusion),
+        }),
+    }
+}
+
+/// [KOR] Subterm Transitivity Axiom (추이성 공리)
+///       ∀ a, b, c. subterm(a, b) ∧ subterm(b, c) ⟹ subterm(a, c)
+/// [ENG] Transitivity of the subterm order.
+pub fn subterm_transitivity_axiom(sub_rel: &str, sort: &BaseType) -> Expr {
+    let (a, b, c) = ("st_a".to_string(), "st_b".to_string(), "st_c".to_string());
+    let sub = |x: &str, y: &str| Expr::ApplyRel {
+        relation: sub_rel.to_string(),
+        args: vec![Expr::Var(x.to_string()), Expr::Var(y.to_string())],
+    };
+
+    Expr::Forall {
+        binders: vec![(a.clone(), sort.clone()), (b.clone(), sort.clone()), (c.clone(), sort.clone())],
+        body: Box::new(Expr::BinOp {
+            op: BinOp::Implies,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::And,
+                left: Box::new(sub(&a, &b)),
+                right: Box::new(sub(&b, &c)),
+            }),
+            right: Box::new(sub(&a, &c)),
+        }),
+    }
+}
+
+/// [KOR] Subterm Irreflexivity Axiom (비반사성 공리)
+///       ∀ a. ¬subterm(a, a)
+///       단계 공리·추이성과 함께 모든 유한한 생성자 순환(x = S(x), x = S(S(x)), ...)을 배제합니다.
+/// [ENG] Irreflexivity of the subterm order. Together with the step and transitivity
+///       axioms this excludes every finite constructor cycle (acyclicity).
+pub fn subterm_irreflexivity_axiom(sub_rel: &str, sort: &BaseType) -> Expr {
+    let a = "st_a".to_string();
+
+    Expr::Forall {
+        binders: vec![(a.clone(), sort.clone())],
+        body: Box::new(Expr::UnOp {
+            op: UnOp::Not,
+            expr: Box::new(Expr::ApplyRel {
+                relation: sub_rel.to_string(),
+                args: vec![Expr::Var(a.clone()), Expr::Var(a)],
+            }),
+        }),
     }
 }
