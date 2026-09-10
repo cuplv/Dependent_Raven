@@ -119,7 +119,8 @@ fn helper(n: Nat, xs: NList, ys: NList) {
 - **Placement:** anywhere in the module before or after the target —
   registration is order-independent; house style is directly above the
   target with a `// Helper:` comment stating the statement in words.
-- **Patterns:** named `_x` binders, never bare `_`.
+- **Patterns:** `_` inside a constructor pattern is fine; no bare `_ =>`
+  catch-all arms (rejected).
 - **Descent & acyclicity:** self-calls only on corresponding-parameter
   strict subterms (at least one strict); no calls to the target, ever;
   calls to already-proven lemmas are free (no depth cost).

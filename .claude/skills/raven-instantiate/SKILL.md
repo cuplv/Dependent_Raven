@@ -153,8 +153,8 @@ proof); say so explicitly, and never present it as exhaustion.
   `.clone()`, no ownership concerns inside the macro.
 - Use binder names in scope in the failing branch (`j_prime`, `h`, `t`);
   a hint may reference only variables bound by that branch.
-- Never a bare `_` in a constructor pattern anywhere you touch — named
-  `_x` binders only.
+- A `_` inside a constructor pattern (`Nat::S(_)`) is fine; a bare `_ =>`
+  catch-all arm is rejected — write out the remaining constructors.
 
 ## 7. Report format
 

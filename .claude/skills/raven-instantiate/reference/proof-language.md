@@ -94,8 +94,9 @@ The contents are RECORDED, not compiled as Rust:
 
 1. REAL calls (helpers, IH) ARE compiled Rust: `.clone()` values you reuse,
    deref boxes with `*` (`tip_nine(*i_prime, *j_prime, k)`).
-2. Never a bare `_` in a constructor pattern — use a named `_x` binder
-   (`Nat::S(_b_min)`); bare wildcards panic the backend.
+2. A `_` inside a constructor pattern is fine (`Nat::S(_)`; it becomes a
+   fresh `_wild_N` binder). A bare `_ =>` catch-all arm is rejected — write
+   out the remaining constructors.
 3. A match target must be a simple variable; to match a boxed tail write
    `match *t.clone() { ... }`.
 4. A `match` inside an `if` branch of a proof body is supported (the
