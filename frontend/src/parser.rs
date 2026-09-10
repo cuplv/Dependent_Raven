@@ -379,7 +379,26 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
         SynExpr::Match(m) => {
             let expr = Box::new(convert_expr(&m.expr));
             let arms = m.arms.iter().map(|arm| {
+                // A guard would have to become an extra path condition on this arm
+                // AND its negation on every later arm (first-match semantics); arms
+                // are encoded as unordered cases today, so a dropped guard yields
+                // overlapping definitional axioms. Reject rather than mis-encode.
+                if arm.guard.is_some() {
+                    panic!(
+                        "match guards (`pat if cond =>`) are not supported; \
+                         move the condition into the arm body as an `if`"
+                    );
+                }
                 let pat = convert_pattern(&arm.pat);
+                // A bare `_` arm is a catch-all; arms are encoded as unordered
+                // cases, so it would overlap every other arm. Keep it rejected.
+                if let Pattern::Wildcard = pat {
+                    panic!(
+                        "a bare `_` match arm is not supported; \
+                         write out the remaining constructors"
+                    );
+                }
+                let pat = name_nested_wildcards(pat);
                 let body = convert_expr(&arm.body);
                 (pat, body)
             }).collect();
@@ -515,10 +534,52 @@ fn convert_block(block: &syn::Block) -> Expr {
         })
 }
 
+thread_local! {
+    static WILDCARD_COUNTER: std::cell::Cell<usize> = std::cell::Cell::new(0);
+}
+
+/// Replaces every `_` nested inside a constructor or tuple pattern with a fresh
+/// `_wild_N` binder. A field wildcard is just a binder nobody reads, but the
+/// checker needs a name to state the path condition `x == C(.., _wild_N, ..)`
+/// and the backend needs one for the axiom's quantifier. Names are unique per
+/// process so nested matches in one body never produce duplicate binders.
+/// Only match-arm patterns go through here; `let _ = e;` keeps its wildcard.
+fn name_nested_wildcards(pat: Pattern) -> Pattern {
+    match pat {
+        Pattern::Wildcard => {
+            let n = WILDCARD_COUNTER.with(|c| {
+                let n = c.get();
+                c.set(n + 1);
+                n
+            });
+            Pattern::Ident(format!("_wild_{}", n))
+        }
+        Pattern::Constructor { name, args, arg_types } => Pattern::Constructor {
+            name,
+            args: args.into_iter().map(name_nested_wildcards).collect(),
+            arg_types,
+        },
+        Pattern::Tuple(args) => {
+            Pattern::Tuple(args.into_iter().map(name_nested_wildcards).collect())
+        }
+        other => other,
+    }
+}
+
 pub fn convert_pattern(pat: &syn::Pat) -> Pattern {
     match pat {
         syn::Pat::Wild(_) => Pattern::Wildcard,
-        syn::Pat::Ident(pi) => Pattern::Ident(pi.ident.to_string()),
+        syn::Pat::Ident(pi) => {
+            // `name @ subpattern` binds the name but the subpattern's shape and
+            // binders would be lost; reject rather than silently widen the arm.
+            if pi.subpat.is_some() {
+                panic!(
+                    "`name @ pattern` bindings are not supported; \
+                     match on the constructor pattern directly"
+                );
+            }
+            Pattern::Ident(pi.ident.to_string())
+        }
         // A type-annotated pattern, e.g. `let y: Nat = ...`. The annotation adds
         // no information the checker doesn't already infer from the initializer,
         // so only the inner pattern matters here.
