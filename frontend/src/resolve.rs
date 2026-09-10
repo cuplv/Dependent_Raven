@@ -60,10 +60,11 @@ pub fn resolve_pattern_types(
         }
         Expr::Match { expr: target, arms } => {
             resolve_pattern_types(target, datatypes);
-            for (pat, arm_expr) in arms {
+            for (pat, arm_expr) in arms.iter_mut() {
                 resolve_in_pattern(pat, datatypes);
                 resolve_pattern_types(arm_expr, datatypes);
             }
+            reject_overlapping_arms(arms);
         }
 
         // 나머지 노드들은 자식만 순회 / Remaining nodes: just traverse children.
@@ -97,6 +98,65 @@ pub fn resolve_pattern_types(
             }
         }
         Expr::BoolConst(_) | Expr::Var(_) => {}
+    }
+}
+
+/// [ENG] Match arms are encoded as UNORDERED cases (one VC per arm in proofs, one
+/// definitional equation per arm in function bodies); nothing records that the
+/// earlier arms did not match. Rust's first-match semantics is therefore only
+/// reproduced when the arms are pairwise disjoint. Two overlapping arms in a
+/// function body yield two equations for the same value, which is inconsistent
+/// whenever their right-hand sides differ. Reject rather than mis-encode.
+/// [KOR] match arm은 순서 없는 경우들로 인코딩되므로(증명: arm마다 VC, 함수 본문: arm마다
+/// 정의 등식), 이전 arm이 매치되지 않았다는 사실은 기록되지 않습니다. 따라서 arm들이 쌍별로
+/// 서로소일 때만 Rust의 first-match 의미론이 재현됩니다. 겹치는 arm은 거부합니다.
+fn reject_overlapping_arms(arms: &[(Pattern, Expr)]) {
+    for i in 0..arms.len() {
+        for j in (i + 1)..arms.len() {
+            if !patterns_disjoint(&arms[i].0, &arms[j].0) {
+                panic!(
+                    "match arms {} (`{}`) and {} (`{}`) overlap; arms are encoded as unordered \
+                     cases, so every pair must be disjoint -- spell out the constructors",
+                    i + 1, render_pattern(&arms[i].0), j + 1, render_pattern(&arms[j].0)
+                );
+            }
+        }
+    }
+}
+
+/// [ENG] True iff no value can match both patterns. A wildcard or a variable
+/// matches everything; two constructor patterns are disjoint iff their heads
+/// differ or some corresponding pair of fields is disjoint; likewise for tuples.
+fn patterns_disjoint(p: &Pattern, q: &Pattern) -> bool {
+    match (p, q) {
+        (Pattern::Wildcard, _) | (_, Pattern::Wildcard)
+        | (Pattern::Ident(_), _) | (_, Pattern::Ident(_)) => false,
+        (
+            Pattern::Constructor { name: n1, args: a1, .. },
+            Pattern::Constructor { name: n2, args: a2, .. },
+        ) => n1 != n2 || a1.iter().zip(a2).any(|(x, y)| patterns_disjoint(x, y)),
+        (Pattern::Tuple(a1), Pattern::Tuple(a2)) => {
+            a1.iter().zip(a2).any(|(x, y)| patterns_disjoint(x, y))
+        }
+        // A constructor against a tuple cannot both match one value.
+        _ => true,
+    }
+}
+
+fn render_pattern(pat: &Pattern) -> String {
+    match pat {
+        Pattern::Wildcard => "_".to_string(),
+        Pattern::Ident(name) => name.clone(),
+        Pattern::Constructor { name, args, .. } if args.is_empty() => name.clone(),
+        Pattern::Constructor { name, args, .. } => format!(
+            "{}({})",
+            name,
+            args.iter().map(render_pattern).collect::<Vec<_>>().join(", ")
+        ),
+        Pattern::Tuple(args) => format!(
+            "({})",
+            args.iter().map(render_pattern).collect::<Vec<_>>().join(", ")
+        ),
     }
 }
 
