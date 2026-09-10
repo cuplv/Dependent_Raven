@@ -36,9 +36,12 @@ functionality axiom — harmless bookkeeping, ignore it.
 ## The exemplar query, region by region
 
 **Region 1 — sorts and constructor axioms** (`UI_Nat`, `Nat__Z`,
-`Nat__S_rel` + three axioms): functionality ("S maps each input to at most
-one output"), injectivity, and distinctness from `Z`. Note what is NOT
-here — no axiom says every `UI_Nat` element is `Z` or an S-image.
+`Nat__S_rel` + axioms): functionality ("S maps each input to at most
+one output"), injectivity, distinctness from `Z`, and acyclicity through a
+subterm order `Nat__subterm` (S's input is a proper subterm of its output;
+transitive; irreflexive — so `n = S(n)`, `n = S(S(n))`, ... are impossible).
+All of these are universal. Note what is NOT here — no axiom says every
+`UI_Nat` element is `Z` or an S-image.
 
 **Region 2 — function relations** (`add_rel`, `sub_rel` + functionality
 axioms). Again note the absence: nothing asserts an output EXISTS for any
