@@ -83,6 +83,14 @@ silently vacuous. Why this is so is visible in the query text: see
    `instantiate!` lines in the failing branch, before the tail/recursive
    call (syntax: §6), then re-run the test.
 
+   Do NOT minimize, filter, or second-guess candidates at this stage. Add
+   every candidate the round produced, including ones that look redundant,
+   unlikely, or already implied by another hint. Adding is always sound
+   (§1); a candidate left out costs an extra round and can hide progress,
+   while a surplus hint costs nothing until minimization. Minimization
+   happens exactly once, after the proof is green (step 5) — never while
+   the proof is still red.
+
    *Optional self-audit* — do this when the user requested an audited run,
    or whenever you are unsure an edit stayed inside §1's envelope:
 
@@ -99,8 +107,9 @@ silently vacuous. Why this is so is visible in the query text: see
    silently empty.)
 
 5. **Loop or finish.**
-   - Green: minimize — remove each added hint in turn, keep only those
-     whose removal re-breaks the proof — then report the final set.
+   - Green: NOW minimize — this is the only point in the procedure where
+     hints are removed. Remove each added hint in turn, keep only those
+     whose removal re-breaks the proof, then report the final set.
    - Still red: re-read the REGENERATED counterexample. Your hints now
      appear in the ledger (group "user hints"), which pins deeper
      scrutinees and enables the next layer of unfoldings. Repeat from
