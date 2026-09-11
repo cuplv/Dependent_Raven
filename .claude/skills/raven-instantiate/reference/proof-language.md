@@ -98,7 +98,9 @@ The contents are RECORDED, not compiled as Rust:
    fresh `_wild_N` binder). A bare `_ =>` catch-all arm is rejected — write
    out the remaining constructors.
 3. A match target must be a simple variable; to match a boxed tail write
-   `match *t.clone() { ... }`.
+   `match *t.clone() { ... }`. In a FUNCTION body the variable may be
+   let-bound to a call (`let s = add(x, y); match s { .. }`), which is how a
+   definition branches on a computed value.
 4. A `match` inside an `if` branch of a proof body is supported (the
    checking-mode If rule; `tests/if_match_proof.rs` is the regression
    test): split on the guard first, then on the shape, each branch

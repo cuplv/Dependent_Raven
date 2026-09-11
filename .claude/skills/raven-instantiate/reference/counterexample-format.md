@@ -44,6 +44,14 @@ shape of the scrutinee argument(s), and instantiate its right-hand side.
 An `if` right-hand side means the arm compiles to two guarded equations
 sharing the guard term (see example 4).
 
+A `let` in a function body is shown inlined (`pick(x, y) = if is_zero(add(x, y))
+then add(y, x) else add(x, y)`), so its call appears as an ordinary application
+and needs a switch like any other. When the body matches on the bound name, the
+equation keeps the `let` and the `match` on one line
+(`f(x, y) = let s = add(x, y) in match s { Z => .., S(p) => .. }`): the arm
+taken is decided by the shape of `add(x, y)`, so that application must have a
+switch, and its one-step result pins which arm's right-hand side applies.
+
 ## 3. Declarations
 
 Sorts (`declare-sort`), all constructors of every used datatype (declared
