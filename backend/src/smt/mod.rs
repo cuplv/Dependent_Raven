@@ -41,6 +41,58 @@ fn extract_pat_binders(pat: &Pattern, ty: &BaseType, binders: &mut Vec<(String, 
     }
 }
 
+/// True iff some `match` in `expr` scrutinises the variable `name`.
+pub(crate) fn is_match_scrutinee(name: &Ident, expr: &Expr) -> bool {
+    match expr {
+        Expr::Match { expr: target, arms } => {
+            matches!(&**target, Expr::Var(v) if v == name)
+                || arms.iter().any(|(_, arm)| is_match_scrutinee(name, arm))
+        }
+        Expr::If { cond, then_expr, else_expr } => {
+            is_match_scrutinee(name, cond)
+                || is_match_scrutinee(name, then_expr)
+                || is_match_scrutinee(name, else_expr)
+        }
+        Expr::Let { bound_expr, body, .. } => {
+            is_match_scrutinee(name, bound_expr) || is_match_scrutinee(name, body)
+        }
+        _ => false,
+    }
+}
+
+/// Base sort of a let-bound expression in a function body, for its quantifier
+/// binder. Calls take their declared return sort, constructors their datatype,
+/// variables the sort they were bound with; logical operators are Bool.
+fn infer_let_sort(
+    expr: &Expr,
+    binders: &[(Ident, BaseType)],
+    program: &Program,
+    func_name: &str,
+) -> BaseType {
+    match expr {
+        Expr::Var(v) => binders
+            .iter()
+            .find(|(n, _)| n == v)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_else(|| panic!("unbound variable `{}` in the body of `{}`", v, func_name)),
+        Expr::Call { func, .. } => program
+            .functions
+            .get(func)
+            .map(|def| get_fun_types(&def.signature).1)
+            .unwrap_or_else(|| panic!("unknown function `{}` in the body of `{}`", func, func_name)),
+        Expr::Constructor { name, .. } => match name.rsplit_once("::") {
+            Some((enum_name, _)) => BaseType::Custom(enum_name.to_string()),
+            None => panic!("constructor `{}` is not qualified as 'Enum::Variant'", name),
+        },
+        Expr::BoolConst(_) | Expr::BinOp { .. } | Expr::UnOp { .. } => BaseType::Bool,
+        Expr::If { then_expr, .. } => infer_let_sort(then_expr, binders, program, func_name),
+        other => panic!(
+            "cannot determine the sort of let-bound expression {:?} in the body of `{}`",
+            other, func_name
+        ),
+    }
+}
+
 /// [KOR] 함수의 시그니처에서 인자 타입 목록과 반환 타입을 추출합니다.
 /// [ENG] Extracts the list of argument types and the return type from a function's signature.
 pub(crate) fn get_fun_types(mut ty: &Type) -> (Vec<BaseType>, BaseType) {
@@ -533,6 +585,52 @@ fn generate_axioms_from_body(
         generate_axioms_from_body(
             else_expr, args_map, binders, func_name, params, &else_guards, ctx, program,
         );
+    } else if let Expr::Let { pat, bound_expr, body } = expr {
+        // The leaf pipeline cannot split an `if`/`match` hidden under a `let`,
+        // so every `let` is peeled here, in one of two ways:
+        //  - `x` is a match scrutinee in `body`: keep `x` as a universally
+        //    quantified binder and add the guard `x == e` (as T-LET does in
+        //    proofs). The Match case then substitutes `x := C(..)` into that
+        //    guard, giving the path condition `C(..) == e`.
+        //  - otherwise: substitute `e` for `x` (shadow-aware). A guard `x == e`
+        //    would demand a definedness witness for `e` in EVERY branch, even
+        //    ones that never use `x`; substitution only asks for it where used.
+        match pat {
+            Pattern::Ident(name) if !is_match_scrutinee(name, body) => {
+                let substituted = frontend::env::substitute_expr(body, name, bound_expr);
+                generate_axioms_from_body(
+                    &substituted, args_map, binders, func_name, params, guards, ctx, program,
+                );
+            }
+            Pattern::Ident(name) => {
+                if binders.iter().any(|(n, _)| n == name) {
+                    panic!(
+                        "let-binding `{}` in the body of `{}` shadows a variable in scope; rename it",
+                        name, func_name
+                    );
+                }
+                let sort = infer_let_sort(bound_expr, binders, program, func_name);
+                let mut new_binders = binders.clone();
+                new_binders.push((name.clone(), sort));
+                let mut new_guards = guards.to_vec();
+                new_guards.push(Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Var(name.clone())),
+                    right: bound_expr.clone(),
+                });
+                generate_axioms_from_body(
+                    body, args_map, &new_binders, func_name, params, &new_guards, ctx, program,
+                );
+            }
+            // `let _ = e;` binds nothing in a function body.
+            Pattern::Wildcard => generate_axioms_from_body(
+                body, args_map, binders, func_name, params, guards, ctx, program,
+            ),
+            other => panic!(
+                "unsupported let pattern {:?} in the body of `{}`",
+                other, func_name
+            ),
+        }
     } else {
         // We have reached a leaf expression (no top-level `Match`).
         // Construct the Left-Hand Side (LHS) of the equation using the original parameter order

@@ -72,6 +72,19 @@ fn walk(expr: &Expr, bindings: &mut Vec<(Ident, Pattern)>, out: &mut Vec<Branch>
             walk(arm_body, bindings, out);
             bindings.pop();
         }
+    } else if let Expr::Let { pat, bound_expr, body } = expr {
+        // Mirror the axiom generator: a binding that is later matched on is
+        // kept (rendered as `let x = e in match x { .. }` in one leaf); any
+        // other binding is inlined so the block reads as one equation per branch.
+        match pat {
+            Pattern::Ident(name) if crate::smt::is_match_scrutinee(name, body) => {
+                out.push(Branch { bindings: bindings.clone(), rhs: expr.clone() });
+            }
+            Pattern::Ident(name) => {
+                walk(&frontend::env::substitute_expr(body, name, bound_expr), bindings, out);
+            }
+            _ => walk(body, bindings, out),
+        }
     } else {
         out.push(Branch {
             bindings: bindings.clone(),
@@ -221,6 +234,19 @@ pub(super) fn render_expr(e: &Expr, subst: &[(Ident, String)]) -> String {
             render_expr(then_expr, subst),
             render_expr(else_expr, subst)
         ),
+        Expr::Let { pat, bound_expr, body } => format!(
+            "let {} = {} in {}",
+            render_pattern(pat, subst),
+            render_expr(bound_expr, subst),
+            render_expr(body, subst)
+        ),
+        Expr::Match { expr, arms } => {
+            let rendered: Vec<String> = arms
+                .iter()
+                .map(|(p, e)| format!("{} => {}", render_pattern(p, subst), render_expr(e, subst)))
+                .collect();
+            format!("match {} {{ {} }}", render_expr(expr, subst), rendered.join(", "))
+        }
         other => panic!(
             "counterexample definitions: expression cannot be rendered as a definition body: {:?}",
             other
