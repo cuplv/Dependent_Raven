@@ -146,8 +146,29 @@ fn render_fact(fact: &Expr) -> String {
                 left,
                 right,
             } => format!("{} != {}", print_term(left), print_term(right)),
+            // A negated compound needs parentheses: `!(a && b)`, not `!a && b`.
+            inner @ Expr::BinOp { .. } => format!("!({})", render_fact(inner)),
             inner => format!("!{}", render_fact(inner)),
         },
+        // Compound facts: a helper's postcondition may be a conjunction, a
+        // disjunction, or a nested implication (only the OUTER implies of a
+        // context fact becomes the gate; the rest arrives here). Recurse so
+        // the term printer never sees a formula.
+        Expr::BinOp {
+            op: BinOp::And,
+            left,
+            right,
+        } => format!("{} && {}", render_fact(left), render_fact(right)),
+        Expr::BinOp {
+            op: BinOp::Or,
+            left,
+            right,
+        } => format!("({}) || ({})", render_fact(left), render_fact(right)),
+        Expr::BinOp {
+            op: BinOp::Implies,
+            left,
+            right,
+        } => format!("implies({}, {})", render_fact(left), render_fact(right)),
         other => print_term(other),
     }
 }
@@ -167,6 +188,25 @@ mod tests {
 
     use super::super::dissect::dissect;
     use super::*;
+
+    #[test]
+    fn render_fact_handles_compound_postconditions() {
+        let binop = |op: BinOp, l: Expr, r: Expr| Expr::BinOp { op, left: Box::new(l), right: Box::new(r) };
+        let a = Expr::Call { func: "a".to_string(), args: vec![Expr::Var("x".to_string())] };
+        let b = Expr::Call { func: "b".to_string(), args: vec![Expr::Var("x".to_string())] };
+        let c = Expr::Call { func: "c".to_string(), args: vec![Expr::Var("x".to_string())] };
+
+        // the residue of a curried helper fact: implies(b, c) after the outer gate was split off
+        assert_eq!(render_fact(&binop(BinOp::Implies, b.clone(), c.clone())), "implies((b x), (c x))");
+        // a conjunctive postcondition (the combined AVL lemma's shape)
+        assert_eq!(render_fact(&binop(BinOp::And, a.clone(), b.clone())), "(a x) && (b x)");
+        // a disjunctive one (the height bound), with an equality inside
+        let eq = binop(BinOp::Eq, a.clone(), b.clone());
+        assert_eq!(render_fact(&binop(BinOp::Or, eq, c.clone())), "((a x) == (b x)) || ((c x))");
+        // negation still recurses through the new cases
+        let not = Expr::UnOp { op: UnOp::Not, expr: Box::new(binop(BinOp::And, a, b)) };
+        assert_eq!(render_fact(&not), "!((a x) && (b x))");
+    }
 
     fn var(name: &str) -> Expr {
         Expr::Var(name.to_string())

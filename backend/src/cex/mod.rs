@@ -252,6 +252,24 @@ fn holding_fact_sexpr(fact: &Expr) -> String {
             op: frontend::ast::UnOp::Not,
             expr,
         } => format!("(not {})", holding_fact_sexpr(expr)),
+        // Compound antecedents: a goal `implies(A && B, Q)` peels `A && B` off
+        // as one holding fact; render it as one SMT formula rather than
+        // handing a formula to the term printer.
+        Expr::BinOp {
+            op: BinOp::And,
+            left,
+            right,
+        } => format!("(and {} {})", holding_fact_sexpr(left), holding_fact_sexpr(right)),
+        Expr::BinOp {
+            op: BinOp::Or,
+            left,
+            right,
+        } => format!("(or {} {})", holding_fact_sexpr(left), holding_fact_sexpr(right)),
+        Expr::BinOp {
+            op: BinOp::Implies,
+            left,
+            right,
+        } => format!("(=> {} {})", holding_fact_sexpr(left), holding_fact_sexpr(right)),
         other => format!("(= {} true)", print::print_term(other)),
     }
 }
@@ -267,5 +285,32 @@ fn eq_sides(expr: &Expr) -> (&Expr, &Expr) {
             "counterexample emitter: expected an equality, got {:?}",
             other
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holding_fact_sexpr_handles_compound_antecedents() {
+        let binop = |op: BinOp, l: Expr, r: Expr| Expr::BinOp { op, left: Box::new(l), right: Box::new(r) };
+        let x = || Expr::Var("x".to_string());
+        let a = Expr::Call { func: "a".to_string(), args: vec![x()] };
+        let b = Expr::Call { func: "b".to_string(), args: vec![x()] };
+        let c = Expr::Call { func: "c".to_string(), args: vec![x()] };
+
+        // an `&&` chain peeled off the goal as one antecedent
+        assert_eq!(
+            holding_fact_sexpr(&binop(BinOp::And, binop(BinOp::And, a.clone(), b.clone()), c.clone())),
+            "(and (and (= (a x) true) (= (b x) true)) (= (c x) true))"
+        );
+        // disjunction with an equality, and a nested implication
+        let eq = binop(BinOp::Eq, a.clone(), b.clone());
+        assert_eq!(holding_fact_sexpr(&binop(BinOp::Or, eq, c.clone())), "(or (= (a x) (b x)) (= (c x) true))");
+        assert_eq!(holding_fact_sexpr(&binop(BinOp::Implies, a.clone(), b.clone())), "(=> (= (a x) true) (= (b x) true))");
+        // negation still recurses
+        let not = Expr::UnOp { op: frontend::ast::UnOp::Not, expr: Box::new(binop(BinOp::And, a, b)) };
+        assert_eq!(holding_fact_sexpr(&not), "(not (and (= (a x) true) (= (b x) true)))");
     }
 }
