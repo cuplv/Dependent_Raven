@@ -44,6 +44,11 @@ shape of the scrutinee argument(s), and instantiate its right-hand side.
 An `if` right-hand side means the arm compiles to two guarded equations
 sharing the guard term (see example 4).
 
+Logical connectives in a definition are shown as written
+(`both_zero(a, b) = is_zero(a) && is_zero(b)`, `if p(x) && q(x) then .. else ..`);
+each application inside them is an ordinary right-hand-side term and needs a
+switch like any other — there is no special guard rule for `&&`/`||`.
+
 A `let` in a function body is shown inlined (`pick(x, y) = if is_zero(add(x, y))
 then add(y, x) else add(x, y)`), so its call appears as an ordinary application
 and needs a switch like any other. When the body matches on the bound name, the
