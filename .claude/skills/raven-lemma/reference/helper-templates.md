@@ -116,9 +116,11 @@ fn helper(n: Nat, xs: NList, ys: NList) {
 - **Spec boxing:** boxed constructor fields need `Box::new` in the
   `Lemma(...)` spec (it is parsed as a Rust expression); never inside
   `instantiate!`.
-- **Placement:** anywhere in the module before or after the target —
-  registration is order-independent; house style is directly above the
-  target with a `// Helper:` comment stating the statement in words.
+- **Placement:** ABOVE every lemma that calls it. Items are registered in
+  file order and a call is resolved against the functions registered so
+  far, so a helper placed below its caller fails with "Unbound function or
+  lemma: <helper>". House style is directly above the target with a
+  `// Helper:` comment stating the statement in words.
 - **Patterns:** `_` inside a constructor pattern is fine; no bare `_ =>`
   catch-all arms (rejected).
 - **Descent & acyclicity:** self-calls only on corresponding-parameter
