@@ -280,8 +280,41 @@ pub fn synthesize_expr(
             Type::Base(BaseType::Unit)
         }
 
-        Expr::BinOp { .. } | Expr::UnOp { .. } | Expr::Forall { .. } | Expr::Exists { .. } | Expr::ApplyRel { .. } | Expr::ExistentialBindings(_) => {
-            unimplemented!("T-LOGIC not implemented")
+        // [T-LOGIC]: Boolean connectives and (dis)equality in PROGRAM position
+        // (function bodies: `if` conditions, let-bound bools, Bool-returning
+        // tails). Operands are synthesized so the calls inside them contribute
+        // their own VCs; the result is the selfified Bool `{v: Bool | v == expr}`,
+        // exactly as T-CONST and T-VAR do, so the connective reaches the backend
+        // as a term. In SPEC position these nodes are never synthesized:
+        // refinements are embedded as formulas directly.
+        Expr::UnOp { op: UnOp::Not, expr: inner } => {
+            let inner_ty = synthesize_expr(env, inner, global_specs, vcs);
+            expect_base(&inner_ty, &BaseType::Bool, "operand of `!`");
+            selfified_bool(expr.clone())
+        }
+        Expr::BinOp { op, left, right } => {
+            let left_ty = synthesize_expr(env, left, global_specs, vcs);
+            let right_ty = synthesize_expr(env, right, global_specs, vcs);
+            match op {
+                BinOp::And | BinOp::Or | BinOp::Implies => {
+                    expect_base(&left_ty, &BaseType::Bool, "left operand of a logical connective");
+                    expect_base(&right_ty, &BaseType::Bool, "right operand of a logical connective");
+                }
+                BinOp::Eq | BinOp::Neq => {
+                    let (l, r) = (base_of(&left_ty), base_of(&right_ty));
+                    if l.is_none() || l != r {
+                        panic!(
+                            "T-LOGIC: `==`/`!=` operands must have the same base sort, got {:?} and {:?}",
+                            l, r
+                        );
+                    }
+                }
+            }
+            selfified_bool(expr.clone())
+        }
+
+        Expr::Forall { .. } | Expr::Exists { .. } | Expr::ApplyRel { .. } | Expr::ExistentialBindings(_) => {
+            unimplemented!("quantifiers are not allowed in program position (only inside specs)")
         }
     }
 }
@@ -734,6 +767,26 @@ fn base_of(ty: &Type) -> Option<BaseType> {
         Type::Refined(r) => Some(r.base.clone()),
         Type::Arrow(_) => None,
     }
+}
+
+/// Panics unless `ty` has the base sort `expected` (used by T-LOGIC).
+fn expect_base(ty: &Type, expected: &BaseType, what: &str) {
+    if base_of(ty).as_ref() != Some(expected) {
+        panic!("T-LOGIC: {} must be {:?}, got {:?}", what, expected, base_of(ty));
+    }
+}
+
+/// `{v: Bool | v == e}`: the selfified type of a Bool-valued program expression.
+fn selfified_bool(e: Expr) -> Type {
+    Type::Refined(RefinedType {
+        bound_var: "v".to_string(),
+        base: BaseType::Bool,
+        predicate: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Var("v".to_string())),
+            right: Box::new(e),
+        },
+    })
 }
 
 /// [KOR] 타입(Type)에서 뼈대(BaseType)와 정제 조건(Predicate Expr)을 분리해 냅니다.
