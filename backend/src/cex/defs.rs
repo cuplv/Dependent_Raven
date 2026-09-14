@@ -31,7 +31,7 @@
 
 use std::collections::BTreeSet;
 
-use frontend::ast::{BaseType, Expr, Ident, Pattern, Program, Type};
+use frontend::ast::{BaseType, BinOp, Expr, Ident, Pattern, Program, Type};
 
 use super::print::{sorted_ci, variant_name};
 use crate::smt::get_fun_types;
@@ -247,10 +247,43 @@ pub(super) fn render_expr(e: &Expr, subst: &[(Ident, String)]) -> String {
                 .collect();
             format!("match {} {{ {} }}", render_expr(expr, subst), rendered.join(", "))
         }
+        // Logical connectives in program position (T-LOGIC) render in source
+        // syntax. A compound operand is parenthesised unless it is the same
+        // associative connective as its parent (`a && b && c`).
+        Expr::UnOp { op: frontend::ast::UnOp::Not, expr: inner } => {
+            format!("!{}", render_operand(inner, None, subst))
+        }
+        Expr::BinOp { op, left, right } => {
+            let sym = match op {
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+                BinOp::Implies => "==>",
+                BinOp::Eq => "==",
+                BinOp::Neq => "!=",
+            };
+            format!(
+                "{} {} {}",
+                render_operand(left, Some(op), subst),
+                sym,
+                render_operand(right, Some(op), subst)
+            )
+        }
         other => panic!(
             "counterexample definitions: expression cannot be rendered as a definition body: {:?}",
             other
         ),
+    }
+}
+
+fn render_operand(e: &Expr, parent: Option<&frontend::ast::BinOp>, subst: &[(Ident, String)]) -> String {
+    let same_assoc = matches!(
+        (e, parent),
+        (Expr::BinOp { op: BinOp::And, .. }, Some(BinOp::And))
+            | (Expr::BinOp { op: BinOp::Or, .. }, Some(BinOp::Or))
+    );
+    match e {
+        Expr::BinOp { .. } if !same_assoc => format!("({})", render_expr(e, subst)),
+        _ => render_expr(e, subst),
     }
 }
 
@@ -286,6 +319,31 @@ mod tests {
             name: name.to_string(),
             args,
         }
+    }
+
+    #[test]
+    fn renders_logical_connectives_in_source_syntax() {
+        let and = |l: Expr, r: Expr| Expr::BinOp { op: BinOp::And, left: Box::new(l), right: Box::new(r) };
+        let or = |l: Expr, r: Expr| Expr::BinOp { op: BinOp::Or, left: Box::new(l), right: Box::new(r) };
+        let not = |e: Expr| Expr::UnOp { op: frontend::ast::UnOp::Not, expr: Box::new(e) };
+        let p = call("p", vec![var("x")]);
+        let q = call("q", vec![var("x")]);
+        let r = call("r", vec![var("x")]);
+
+        // same associative connective: no parentheses
+        assert_eq!(render_expr(&and(and(p.clone(), q.clone()), r.clone()), &[]), "p(x) && q(x) && r(x)");
+        // mixed connectives: the inner one is parenthesised
+        assert_eq!(render_expr(&or(and(p.clone(), q.clone()), r.clone()), &[]), "(p(x) && q(x)) || r(x)");
+        // negation of a call and of a compound
+        assert_eq!(render_expr(&not(p.clone()), &[]), "!p(x)");
+        assert_eq!(render_expr(&not(and(p.clone(), q.clone())), &[]), "!(p(x) && q(x))");
+        // inside an if condition
+        let ite = Expr::If {
+            cond: Box::new(and(p, q)),
+            then_expr: Box::new(cons("Nat::Z", vec![])),
+            else_expr: Box::new(cons("Nat::S", vec![cons("Nat::Z", vec![])])),
+        };
+        assert_eq!(render_expr(&ite, &[]), "if p(x) && q(x) then Z else S(Z)");
     }
 
     fn pat_cons(name: &str, args: Vec<Pattern>) -> Pattern {
