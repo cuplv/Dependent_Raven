@@ -318,57 +318,9 @@ fn get_return_base_type(func_name: &str, global_specs: &HashMap<Ident, FunctionD
     }
 }
 
-/// Does `expr` mention the variable `name` anywhere?
-fn mentions_var(expr: &Expr, name: &Ident) -> bool {
-    match expr {
-        Expr::Var(v) => v == name,
-        Expr::BoolConst(_) => false,
-        Expr::Call { args, .. } | Expr::Constructor { args, .. } | Expr::ApplyRel { args, .. } | Expr::Tuple(args) => {
-            args.iter().any(|a| mentions_var(a, name))
-        }
-        Expr::BinOp { left, right, .. } => mentions_var(left, name) || mentions_var(right, name),
-        Expr::UnOp { expr, .. } | Expr::Instantiate(expr) => mentions_var(expr, name),
-        Expr::If { cond, then_expr, else_expr } => {
-            mentions_var(cond, name) || mentions_var(then_expr, name) || mentions_var(else_expr, name)
-        }
-        Expr::Let { bound_expr, body, .. } => mentions_var(bound_expr, name) || mentions_var(body, name),
-        Expr::Match { expr, arms } => {
-            mentions_var(expr, name) || arms.iter().any(|(_, e)| mentions_var(e, name))
-        }
-        Expr::Forall { body, .. } | Expr::Exists { body, .. } => mentions_var(body, name),
-        Expr::ExistentialBindings(bs) => bs.iter().any(|(_, e)| mentions_var(e, name)),
-    }
-}
-
-/// If `body` is the equality `var == t` or `t == var` with `var` not free in `t`,
-/// return `t`: the call's result is pinned to a term the formula already names.
-fn pinned_to<'a>(var: &Ident, body: &'a Expr) -> Option<&'a Expr> {
-    if let Expr::BinOp { op: BinOp::Eq, left, right } = body {
-        let is_var = |e: &Expr| matches!(e, Expr::Var(v) if v == var);
-        if is_var(left) && !mentions_var(right, var) {
-            return Some(right);
-        }
-        if is_var(right) && !mentions_var(left, var) {
-            return Some(left);
-        }
-    }
-    None
-}
-
 /// [KOR] `let var_name = func(args) in body` 형태를 관계적 추상화로 변환합니다.
 ///       - 긍정 극성일 경우: `Forall(var_name: RetType). func_rel(args..., var_name) => body`
 ///       - 부정 극성일 경우: `Exists(var_name: RetType). func_rel(args..., var_name) && body`
-///
-/// Peephole (after CamlStar `36bd5b7`): when `body` is exactly `var_name == t` with
-/// `var_name` not free in `t`, emit the bare literal `func_rel(args..., t)` instead.
-///   - negative polarity: `∃x. R(a,x) ∧ x = t  ≡  R(a,t)` (one-point rule), exact;
-///   - positive polarity: `R(a,t)` is STRONGER than `∀x. R(a,x) ⇒ x = t` — given
-///     functionality it equals that clause plus `∃x. R(a,x)`, a pointwise totality
-///     instance whose witness the formula names. Sound because every relation is the
-///     graph of a total function in every intended model, and still EPR because no
-///     existential is written. Effect: a definitional leaf `f(args) = t` asserts that
-///     `f(args)` EXISTS wherever the other terms of the leaf exist, so the result of a
-///     pinned unfolding never needs an `instantiate!` hint (`doc/relabs_peephole.md`).
 fn transform_call_to_rel(
     var_name: &Ident,
     func_name: &str,
@@ -385,23 +337,19 @@ fn transform_call_to_rel(
         // 텅 빈 Constructor(예: Nat::Z)가 상수 Var(Nat__Z)로 잘 변환되게 합니다.
         rel_args.push(relabs(arg, is_pos, global_specs));
     }
+    rel_args.push(Expr::Var(var_name.clone()));
+
     // [KOR] 원래의 함수명과 SMT 상의 관계식(Predicate)을 명확히 구분하기 위해 `_rel` 접미사를 붙입니다.
     //       (예: `union` => `union_rel`) 이를 통해 SMT 내장 함수나 다른 식별자와의 이름 충돌을 방지합니다.
-    // [ENG] Append the `_rel` suffix to distinguish the relational predicate from the original function
+    // [ENG] Append the `_rel` suffix to distinguish the relational predicate from the original function 
     //       in SMT (e.g., `union` => `union_rel`). This prevents naming collisions with SMT built-ins or other identifiers.
-    let relation = format!("{}_rel", func_name);
+    let apply_rel = Expr::ApplyRel {
+        relation: format!("{}_rel", func_name), 
+        args: rel_args,
+    };
 
     // 2. 내부 Body 재귀 변환
     let inner_body = relabs(body, is_pos, global_specs);
-
-    // Peephole: the result is pinned to a term the formula names -> bare literal.
-    if let Some(t) = pinned_to(var_name, &inner_body) {
-        rel_args.push(t.clone());
-        return Expr::ApplyRel { relation, args: rel_args };
-    }
-
-    rel_args.push(Expr::Var(var_name.clone()));
-    let apply_rel = Expr::ApplyRel { relation, args: rel_args };
 
     // 3. 변수 바인더 생성 (정확한 반환 타입 조회)
     // [KOR] 이전의 더미 타입("Unknown") 대신 `global_specs`를 조회하여 정확한 SMT Sort를 알아냅니다.
