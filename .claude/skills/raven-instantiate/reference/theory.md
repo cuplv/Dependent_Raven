@@ -9,14 +9,9 @@ are all you need.
 ## Fact 1 — An instantiation is a pointwise totality instance
 
 The functions are total in reality, but the encoding carries NO totality
-axiom (see `smt-encoding.md`), with one built-in family of exceptions since
-2026-09-18: wherever a definitional equation pins a call's result to a term
-the formula names, the encoding asserts that call's existence itself (the
-relabs peephole — `∀x. f_rel(a,x) ⇒ x = t` is emitted as `f_rel(a, t)`, which
-with functionality equals the clause plus `∃x. f_rel(a,x)`). Everywhere else,
-`instantiate!(t)` asserts, for each application node inside `t`, exactly the
-totality instance at that point: `∃r. f_rel(args, r)`. Consequences the skill
-uses:
+axiom (see `smt-encoding.md`). `instantiate!(t)` asserts, for each
+application node inside `t`, exactly the totality instance at that point:
+`∃r. f_rel(args, r)`. Consequences the skill uses:
 
 - adding a hint is ALWAYS sound — it is a true statement about the real
   functions, so it can never cause a false verification;

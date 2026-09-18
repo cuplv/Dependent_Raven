@@ -98,18 +98,11 @@ file shows the same facts as plain ground asserts.
 
 ## The two deliberate absences (the semantic core)
 
-1. **No totality — except where a definition names the witness.** Nothing
-   asserts `∀x̄ ∃r. f_rel(x̄, r)`. Definedness exists where an exists-switch
-   was asserted (`instantiate!` is pointwise totality) AND, since 2026-09-18
-   (the relabs peephole, `doc/relabs_peephole.md`), where an equation pins a
-   call's result to a term: `let x = f(a) in x == t` is emitted as the bare
-   literal `f_rel(a, t)` rather than `∀x. f_rel(a,x) ⇒ x = t`. So a
-   definitional leaf `f(args) = t` asserts that `f(args)` exists wherever the
-   other terms of that leaf exist — the OUTERMOST result of a pinned unfolding
-   is always defined, and only the inner terms of a right-hand side (and
-   `if`-guard terms) can still be missing. Adding hints remains always sound:
-   they are true statements about the real (total) functions, and so is the
-   peephole (no existential is written, so EPR is preserved).
+1. **No totality.** Nothing asserts `∀x̄ ∃r. f_rel(x̄, r)`. Definedness
+   exists exactly where an exists-switch was asserted — `instantiate!` is
+   pointwise totality. This is why missing instantiations are the dominant
+   failure mode, and why adding them is always sound: they are true
+   statements about the real (total) functions.
 
 2. **No exhaustiveness.** Nothing asserts every `UI_Nat` element is `Z` or
    an S-image, so models may contain junk elements on which no defining

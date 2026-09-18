@@ -76,14 +76,8 @@ silently vacuous. Why this is so is visible in the query text: see
    - for a pinned application, instantiate the matching equation of the
      definitions block; the one-step result terms are the equation's
      right-hand side subterms AND, for an `if` arm, the guard term;
-   - candidates = result terms absent from the ledger, EXCLUDING the
-     outermost application of the right-hand side: since 2026-09-18 the
-     encoding asserts that term's existence itself (the relabs peephole,
-     `reference/theory.md` Fact 1) whenever the pinned application and
-     the inner terms exist. So the candidates are the INNER absent
-     applications of the right-hand side and the guard term. If an
-     outermost result is the only thing missing, the branch will already
-     be green -- re-check pinning before concluding anything.
+   - candidates = result terms absent from the ledger. Prefer the
+     outermost missing term (a deep hint switches all its subterms).
 
 4. **Edit and re-run.** Add ALL of the round's candidates as
    `instantiate!` lines in the failing branch, before the tail/recursive
