@@ -75,7 +75,7 @@ must feed it:
 candidate:  forall x, a.  implies(sorted(a), sorted(insort(x, a)))
 ```
 
-## Pre-validate
+## Pre-validate — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 The instance's antecedent (`sorted(sort(t))`) is already true in the
 context, so probe the consequent:

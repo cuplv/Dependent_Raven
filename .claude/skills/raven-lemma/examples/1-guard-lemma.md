@@ -91,7 +91,7 @@ candidate:  forall x.  eq_nat(x, x)          (reflexivity)
 never generalize two occurrences of the same constant to different
 variables unless the instance demands it.)
 
-## Pre-validate
+## Pre-validate — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 Assert the candidate's instance on the failed query
 (`logs/tip_04_vc_3_failed_query.smt2`):

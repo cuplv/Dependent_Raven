@@ -69,7 +69,7 @@ appears only inside the saturation hint, connected to nothing.)
 Not a new lemma — the instance `height(mirror(r)) == height(r)` of the
 target's own statement, obtained by a recursive call on `r`.
 
-## Pre-validate
+## Pre-validate — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 ```smt2
 (declare-const mr UI_Tree)   (assert (mirror_rel r mr))

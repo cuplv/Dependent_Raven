@@ -72,7 +72,7 @@ Not a lemma — a structural edit: split the failing branch on `m`'s
 constructors. Each resulting arm pins `m`'s shape, which is exactly what
 every blocked equation was waiting for.
 
-## Pre-validate — the shape probe
+## Pre-validate — the shape probe — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 The case-split analogue of the instance probe: assert each constructor
 shape of `m` on the failed query; the split is a verified fix only if

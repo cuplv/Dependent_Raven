@@ -21,6 +21,7 @@ the answer keys.
 Captured artifacts per fixture: `<prop>_counterexample.smt2` (the intake
 counterexample — for prop_04 it shows the guard PRESENT in user hints
 with the proof failing, the guard-signature evidence) and
-`<prop>_failed_query.smt2` (the raw query, for pre-validation probes).
+`<prop>_failed_query.smt2` (the raw query, kept for reference; the skill
+reads it but never probes it).
 
 All six planned fixtures are present.

@@ -79,7 +79,7 @@ Rejected alternative — the goal itself as a "lemma"
 pre-validation success is NOT sufficient. The acyclicity rule filters
 it: a helper may not restate or call the target.
 
-## Pre-validate
+## Pre-validate — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 ```smt2
 (declare-const hl UI_Nat)   (assert (height_rel l hl))

@@ -30,6 +30,14 @@ Read-only, forever: the TARGET's `Lemma(...)` specification, every
 Never weaken a spec, never comment out a property, never mark a test
 ignored.
 
+**Inputs and the only solver run.** Progress comes from reading three
+artifacts — the trial source file, `logs/<goal>_counterexample.smt2`, and
+`logs/<goal>_failed_query.smt2` — and from re-running the trial file with
+`cargo test --test <file>`. That is the only solver invocation. Do NOT
+probe: never append asserts to a failed query, never run z3/cvc5 by hand,
+never write a scratch query. A candidate is validated by one thing only:
+constructing it, calling it, and re-running the test (§4 step 4).
+
 **No `instantiate!` by this skill.** raven-lemma never writes hints
 itself. Instantiations enter only through the composed raven-instantiate
 procedure (§5), and only into lemmas THIS skill generated. If the target
@@ -41,7 +49,7 @@ argument must be the corresponding parameter unchanged or a
 pattern-bound strict subterm of it, with at least one strict. A
 same-argument self-call (`f(t.clone())` inside `f`) would "prove"
 anything — the tool does not check termination — and is forbidden no
-matter what pre-validation says. Every added self-call gets a report
+matter how promising the candidate looks. Every added self-call gets a report
 line: `added f(*r): r ⊏ t via Node(l, e, r)`.
 
 **Acyclicity.** A helper may not call or restate the target, directly or
@@ -79,17 +87,24 @@ into the helper is normal (it is the composition trigger, §5).
    cascade rule: `reference/classification.md`.
 3. **Candidate.** Derive the statement by the signature's recipe;
    generalize MINIMALLY (same constant -> same variable).
-4. **Pre-validate.** Probe the candidate's ground instance on the failed
-   query (`reference/pre-validation.md`). `sat` -> reject, next
-   candidate (budget: 2-3 total -> Stop L1). `unsat` -> proceed — but
-   remember: a clean probe never overrides descent/acyclicity.
+4. **Check the candidate against the counterexample, by reading.** Before
+   constructing, confirm from the file that the candidate's instance
+   contradicts the countermodel: its terms are in the ledger (or are
+   one-step results of pinned unfoldings), and the fact at those terms is
+   incompatible with the negated goal after evaluating both sides (§4 of
+   `reference/classification.md`). This is desk-checking, not probing —
+   no solver runs outside `cargo test`. Two traps: the goal itself,
+   generalized, always "checks" (acyclicity excludes it); two facts needed
+   jointly each look insufficient alone (coverage first, then pair them).
+   Budget: 2-3 constructed candidates per VC that leave the target red
+   -> Stop L1. A promising candidate never overrides descent/acyclicity.
 5. **Construct.** For lemma signatures: pick a template
    (`reference/helper-templates.md`), write the helper BARE, add the
-   call at the validated instance's arguments, in the failing VC's
-   branch. For missing-IH: the descent-checked self-call. For case
-   split: wrap the branch in the match (shape-probe validated).
-   Fragment errors: `reference/epr-fitting.md` (one reformulation pass,
-   else Stop L3).
+   call at the instance's arguments the endpoints name, in the failing
+   VC's branch. For missing-IH: the descent-checked self-call. For case
+   split: wrap the branch in a match on the blocking variable (the
+   variable the ledger shows as shapeless). Fragment errors:
+   `reference/epr-fitting.md` (one reformulation pass, else Stop L3).
 6. **Compose.** Re-run. If a HELPER VC fails, apply
    `../raven-instantiate/SKILL.md`'s procedure to it (§5). If a TARGET
    VC still fails, re-classify from the top (the cascade — fixing one
@@ -116,9 +131,12 @@ into the helper is normal (it is the composition trigger, §5).
 
 - **L0 — wrong intake.** Frontier not saturated -> hand back to
   raven-instantiate. (Criterion: `reference/classification.md`.)
-- **L1 — no validated candidate.** 2-3 probes all `sat` -> report the
-  tried candidates with verdicts and the classification evidence.
-  (Criterion and template: `reference/pre-validation.md`.)
+- **L1 — no candidate closes the VC.** No signature's evidence matches,
+  or 2-3 constructed-and-called candidates each left the target red
+  (with the same countermodel shape in the regenerated counterexample)
+  -> report the tried candidates (statement; helper proven or not; the
+  target's failing VC after the call) and the classification evidence.
+  Do not conclude "unprovable".
 - **L2 — budgets.** Lemma-DEPTH limit, default 3 (a conjecture chain
   growing past three unproven levels -> stop, report the chain for
   review).
@@ -137,8 +155,8 @@ into the helper is normal (it is the composition trigger, §5).
 - **L4 — success.** Verify, minimize, report (§7).
 - **L5 — envelope breach required.** Every conceivable continuation
   lives in a read-only region -> refuse and report what the evidence
-  suggests WITHOUT touching it. Three faces: a possibly-wrong spec (all
-  candidates probe `sat` against a real countermodel), a possibly-buggy
+  suggests WITHOUT touching it. Three faces: a possibly-wrong spec (every
+  constructed candidate leaves the same countermodel standing), a possibly-buggy
   definition (the counterexample's definitions block shows the suspect
   equation), circularity pressure (the only closing fact is the goal
   itself). L5 and the descent/acyclicity rules stay active under ANY
@@ -159,11 +177,16 @@ the suggested next action, explicitly out of scope.
 ## 8. Worked examples (imitate their stage structure)
 
 1. `examples/1-guard-lemma.md` — guard signature; minimal generalization;
-   wrong-candidate probe shown.
+   a wrong candidate shown.
 2. `examples/2-algebraic-lemma.md` — endpoint anti-unification; the
    goal-as-lemma trap; REAL composition (helper needed two hints).
-3. `examples/3-case-split.md` — bare-variable blocker; shape-probe
-   validation; structure instead of a lemma.
+3. `examples/3-case-split.md` — bare-variable blocker; structure instead
+   of a lemma.
+
+(The examples predate the no-probing rule: their "Pre-validate" sections
+show solver probes that are NO LONGER performed. Imitate their
+classification, candidate derivation, construction and composition;
+skip the probes — the desk-check of step 4 replaces them.)
 4. `examples/4-missing-ih.md` — the refined coverage check (instantiated
    goal, not variable mention); descent line demonstrated.
 5. `examples/5-shape-lemma.md` — opaque-application blocker; candidate
@@ -174,9 +197,8 @@ the suggested next action, explicitly out of scope.
 ## 9. Reading order
 
 Working path: this file + the examples. On demand:
-`reference/classification.md`, `reference/pre-validation.md`,
-`reference/helper-templates.md`, `reference/epr-fitting.md`; shared
-background from the sibling skill:
+`reference/classification.md`, `reference/helper-templates.md`,
+`reference/epr-fitting.md`; shared background from the sibling skill:
 `../raven-instantiate/reference/smt-encoding.md` (encoding + the two
 absences), `.../theory.md` (the three facts), `.../counterexample-format.md`
 and `.../proof-language.md`. `fixtures/` holds the six broken proofs with

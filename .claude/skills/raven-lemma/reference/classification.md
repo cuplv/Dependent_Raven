@@ -81,8 +81,9 @@ to a permutation/regrouping of one function's arguments
 disagreement positions: `max(a, b) == max(b, a)`.
 
 **Rejected non-candidate:** the goal itself, generalized. Its instance
-always probes `unsat` (it IS the negated goal's complement) — validation
-success is necessary, not sufficient; the acyclicity rule excludes it.
+trivially contradicts the countermodel (it IS the negated goal's
+complement), so "it would close the VC" is necessary, not sufficient;
+the acyclicity rule excludes it.
 
 **Example:** `examples/2-algebraic-lemma.md`.
 
@@ -108,10 +109,11 @@ VARIABLE of the lemma (contrast Signature 3's opaque application). The
 ledger is typically tiny.
 
 **Fix — structure, not a lemma.** Wrap the failing branch's body in a
-match on the shapeless variable. Pre-validation is the SHAPE PROBE:
-assert each constructor shape on the failed query; the split is
-validated only if EVERY shape closes the VC. Each new arm is its own VC
-(and may need the instantiate procedure).
+match on the shapeless variable — the variable the ledger shows as the
+scrutinee that no branch line, literal, or derived equality pins. The
+split is validated the only way this skill validates anything: re-run
+the test. Each new arm is its own VC (and may need the instantiate
+procedure); an arm that still fails is classified from the top.
 
 **Example:** `examples/3-case-split.md`.
 
@@ -123,13 +125,13 @@ tests in a decision order, and recipes may hand off:
 - test in the order 1 -> 2 -> 3 -> 4 -> 5 -> 6 (cost order, with 3's
   stall falling through to 5);
 - fixing one gap can surface the next (example 4's history: with BOTH
-  the recursive call and the algebraic lemma missing, each candidate
-  alone probes `sat`; fixing the coverage gap first is what lets the
-  algebraic candidate validate) — after each fix, re-run and re-classify
+  the recursive call and the algebraic lemma missing, neither fix alone
+  turns the target green; fixing the coverage gap first is what lets the
+  algebraic candidate close it) — after each fix, re-run and re-classify
   from the top;
-- if no signature matches and no candidate validates within budget, that
-  is Stop L1 (see `pre-validation.md`) — report the evidence and the
-  tried candidates; do not force a fix.
+- if no signature matches, or the constructed candidates leave the target
+  red within budget, that is Stop L1 (SKILL.md §6) — report the evidence
+  and the tried candidates; do not force a fix.
 
 ## Summary table
 
@@ -140,4 +142,4 @@ tests in a decision order, and recipes may hand off:
 | 3 | shape lemma | opaque application blocks the goal's step | constructor-form equation, derived backwards | 5 |
 | 4 | algebraic lemma | endpoints differ by argument permutation | endpoint anti-unification | 2 |
 | 5 | conditional preservation | `P(f(x, A))` wanted, `P(A)` known | `implies(P(a), P(f(x, a)))` | 6 |
-| 6 | case split | frontier empty, bare-variable scrutinee | match on the variable; shape-probe validates | 3 |
+| 6 | case split | frontier empty, bare-variable scrutinee | match on the variable; validated by re-running | 3 |

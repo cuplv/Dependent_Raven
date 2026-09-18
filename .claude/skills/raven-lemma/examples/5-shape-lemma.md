@@ -93,7 +93,7 @@ This derivation — "work backwards from the blocked equation to the
 constructor form it needs" — is the shape signature's recipe, distinct
 from the algebraic signature's endpoint anti-unification.
 
-## Pre-validate
+## Pre-validate — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
 
 ```smt2
 (declare-const amn UI_Nat)    (assert (add_rel m n amn))
