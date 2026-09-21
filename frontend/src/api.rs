@@ -39,7 +39,12 @@ pub fn register_enum(program: &mut Program, enum_name: &str, enum_str: &str) {
                         panic!("Unsupported type in enum variant")
                     };
                     
-                    arg_types.push(BaseType::Custom(ty_str));
+                    // A `bool` field is the built-in Bool, as in function signatures
+                    // (parser::convert_base_type); every other name is a custom sort.
+                    arg_types.push(match ty_str.as_str() {
+                        "bool" | "Bool" => BaseType::Bool,
+                        _ => BaseType::Custom(ty_str),
+                    });
                 }
             }
             syn::Fields::Unit => {
@@ -55,15 +60,21 @@ pub fn register_enum(program: &mut Program, enum_name: &str, enum_str: &str) {
 }
 
 /// [KOR] #[declare] 함수 등록: 본문은 완전히 무시하고 시그니처만 추출하여 저장합니다.
+///       본문이 없으므로(body: None) 백엔드는 관계와 functionality 공리만 만들고
+///       정의 공리는 만들지 않습니다 -- 미해석 함수입니다.
 /// [ENG] Register #[declare] function: Completely ignores the body and extracts only the signature.
+///       With no body (body: None) the backend emits the relation and its functionality
+///       axiom but no definitional equations -- an uninterpreted function.
 pub fn register_declare(program: &mut Program, fn_name: &str, fn_str: &str) {
     println!(" [API] Registering #[declare] function: {}", fn_name);
-    
+
     let item_fn: ItemFn = syn::parse_str(fn_str).expect("Failed to parse declared function");
-    
-    // Rust의 기본 함수 선언에서 시그니처 정보를 추출하여 Type AST로 변환하는 과정이 필요합니다.
-    // 현재는 간단하게 플레이스홀더 타입을 넣거나, 향후 전용 파서를 연결할 수 있습니다.
-    // 여기선 일단 이름만 등록해 둡니다.
+
+    program.functions.insert(fn_name.to_string(), FunctionDef {
+        signature: extract_signature_from_fn(&item_fn),
+        body: None,
+        is_recursive: false,
+    });
 }
 
 fn extract_signature_from_fn(item_fn: &ItemFn) -> Type {
