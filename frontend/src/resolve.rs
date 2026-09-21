@@ -64,6 +64,7 @@ pub fn resolve_pattern_types(
                 resolve_in_pattern(pat, datatypes);
                 resolve_pattern_types(arm_expr, datatypes);
             }
+            expand_catch_all_arms(arms, datatypes);
             reject_overlapping_arms(arms);
         }
 
@@ -98,6 +99,138 @@ pub fn resolve_pattern_types(
             }
         }
         Expr::BoolConst(_) | Expr::Var(_) => {}
+    }
+}
+
+/// [ENG] Replaces every bare `_` arm by the patterns the arms BEFORE it leave
+/// uncovered (Rust's first-match semantics), each carrying a copy of the arm's
+/// body -- a `_` arm binds nothing, so the body needs no adjustment. The new arms
+/// are disjoint from the earlier ones by construction, which is what the
+/// unordered-cases encoding below requires. The datatype of the scrutinee is read
+/// off the first constructor arm; a `_` arm with none before it is rejected.
+/// [KOR] 맨 `_` arm을, 그 앞의 arm들이 덮지 못한 패턴들로 대체합니다(Rust의 first-match
+/// 의미론). 각 패턴은 arm 본문의 사본을 가집니다. 새 arm들은 앞선 arm들과 구성상 서로소입니다.
+fn expand_catch_all_arms(
+    arms: &mut Vec<(Pattern, Expr)>,
+    datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
+) {
+    let mut expanded: Vec<(Pattern, Expr)> = Vec::new();
+    for (pat, body) in arms.drain(..) {
+        if !matches!(pat, Pattern::Wildcard) {
+            expanded.push((pat, body));
+            continue;
+        }
+        let scrutinee_ty = expanded
+            .iter()
+            .find_map(|(p, _)| match p {
+                Pattern::Constructor { name, .. } => name
+                    .rsplit_once("::")
+                    .map(|(enum_name, _)| BaseType::Custom(enum_name.to_string())),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!(
+                "a `_` match arm needs a constructor arm before it: it stands for the \
+                 constructors the earlier arms leave uncovered"
+            ));
+        let mut uncovered = vec![Pattern::Wildcard];
+        for (earlier, _) in &expanded {
+            uncovered = uncovered
+                .iter()
+                .flat_map(|q| subtract(q, &scrutinee_ty, earlier, datatypes))
+                .collect();
+        }
+        for q in uncovered {
+            expanded.push((crate::parser::name_nested_wildcards(q), body.clone()));
+        }
+    }
+    *arms = expanded;
+}
+
+/// [ENG] The patterns that match exactly the values `q` matches and `p` does not;
+/// they are pairwise disjoint. `ty` is the sort at this position, needed to split
+/// a wildcard into the constructors of its datatype.
+fn subtract(
+    q: &Pattern,
+    ty: &BaseType,
+    p: &Pattern,
+    datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
+) -> Vec<Pattern> {
+    match (q, p) {
+        (_, Pattern::Wildcard | Pattern::Ident(_)) => vec![],
+        (Pattern::Wildcard | Pattern::Ident(_), Pattern::Constructor { .. }) => {
+            let BaseType::Custom(enum_name) = ty else {
+                panic!("constructor pattern `{}` at a position of sort {:?}", render_pattern(p), ty)
+            };
+            datatypes[enum_name]
+                .iter()
+                .flat_map(|(variant, field_types)| {
+                    let split = Pattern::Constructor {
+                        name: format!("{}::{}", enum_name, variant),
+                        args: vec![Pattern::Wildcard; field_types.len()],
+                        arg_types: Some(field_types.clone()),
+                    };
+                    subtract(&split, ty, p, datatypes)
+                })
+                .collect()
+        }
+        (
+            Pattern::Constructor { name: q_name, args: q_args, arg_types },
+            Pattern::Constructor { name: p_name, args: p_args, .. },
+        ) => {
+            if q_name != p_name {
+                return vec![q.clone()];
+            }
+            // C(q1..qn) minus C(p1..pn): for each field i, the values that agree with
+            // p on the fields before i, escape p at field i, and are free after it.
+            let field_types = arg_types.as_ref().expect("stamped by resolve_in_pattern");
+            let mut out = Vec::new();
+            let mut agreed: Vec<Pattern> = Vec::new();
+            for i in 0..q_args.len() {
+                for r in subtract(&q_args[i], &field_types[i], &p_args[i], datatypes) {
+                    let mut args = agreed.clone();
+                    args.push(r);
+                    args.extend_from_slice(&q_args[i + 1..]);
+                    out.push(Pattern::Constructor {
+                        name: q_name.clone(),
+                        args,
+                        arg_types: arg_types.clone(),
+                    });
+                }
+                match intersect(&q_args[i], &p_args[i]) {
+                    Some(m) => agreed.push(m),
+                    None => break,
+                }
+            }
+            out
+        }
+        _ => panic!("a `_` match arm is not supported together with tuple patterns"),
+    }
+}
+
+/// [ENG] A pattern matching exactly the values both `q` and `p` match, with every
+/// binder erased to a wildcard; `None` if no value matches both.
+fn intersect(q: &Pattern, p: &Pattern) -> Option<Pattern> {
+    match (q, p) {
+        (Pattern::Wildcard | Pattern::Ident(_), Pattern::Wildcard | Pattern::Ident(_)) => {
+            Some(Pattern::Wildcard)
+        }
+        (Pattern::Wildcard | Pattern::Ident(_), c @ Pattern::Constructor { .. })
+        | (c @ Pattern::Constructor { .. }, Pattern::Wildcard | Pattern::Ident(_)) => intersect(c, c),
+        (
+            Pattern::Constructor { name: q_name, args: q_args, arg_types },
+            Pattern::Constructor { name: p_name, args: p_args, .. },
+        ) => {
+            if q_name != p_name {
+                return None;
+            }
+            let args = q_args
+                .iter()
+                .zip(p_args)
+                .map(|(x, y)| intersect(x, y))
+                .collect::<Option<Vec<_>>>()?;
+            Some(Pattern::Constructor { name: q_name.clone(), args, arg_types: arg_types.clone() })
+        }
+        _ => panic!("a `_` match arm is not supported together with tuple patterns"),
     }
 }
 

@@ -391,14 +391,13 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                 }
                 let pat = convert_pattern(&arm.pat);
                 // A bare `_` arm is a catch-all; arms are encoded as unordered
-                // cases, so it would overlap every other arm. Keep it rejected.
-                if let Pattern::Wildcard = pat {
-                    panic!(
-                        "a bare `_` match arm is not supported; \
-                         write out the remaining constructors"
-                    );
-                }
-                let pat = name_nested_wildcards(pat);
+                // cases, so it would overlap every other arm. It stays a
+                // `Wildcard` here and resolve.rs replaces it, once the datatypes
+                // are known, by the constructors the earlier arms leave uncovered.
+                let pat = match pat {
+                    Pattern::Wildcard => pat,
+                    other => name_nested_wildcards(other),
+                };
                 let body = convert_expr(&arm.body);
                 (pat, body)
             }).collect();
@@ -544,7 +543,7 @@ thread_local! {
 /// and the backend needs one for the axiom's quantifier. Names are unique per
 /// process so nested matches in one body never produce duplicate binders.
 /// Only match-arm patterns go through here; `let _ = e;` keeps its wildcard.
-fn name_nested_wildcards(pat: Pattern) -> Pattern {
+pub(crate) fn name_nested_wildcards(pat: Pattern) -> Pattern {
     match pat {
         Pattern::Wildcard => {
             let n = WILDCARD_COUNTER.with(|c| {
