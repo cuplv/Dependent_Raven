@@ -5,7 +5,9 @@ On every failed VC the verifier writes `logs/<lemma>_vc_<k>_counterexample.smt2`
 self-contained SMT-LIB script describing the countermodel in SOURCE
 vocabulary only — the names you see are the ones written in the proof file.
 It is the working artifact for diagnosis. It is never re-run automatically;
-running `z3` on it yields `sat` (the countermodel exists).
+running `cvc5 --finite-model-find` on it yields `sat` (the countermodel
+exists). Use that configuration, not z3 or plain cvc5: on a satisfiable
+query of AVL size z3 does not terminate and cvc5's default answers `unknown`.
 
 Full real instances live in `../fixtures/*_counterexample.smt2`. The
 sections, in file order:
@@ -63,7 +65,7 @@ Sorts (`declare-sort`), all constructors of every used datatype (declared
 even when no term mentions them — a path condition may), functions with
 source arities, then the goal's input variables. Notes: an uninterpreted
 sort (e.g. `Elem`) is just another `declare-sort`; a source sort colliding
-with a Z3 built-in is written with a trailing underscore and a comment
+with an SMT-LIB built-in is written with a trailing underscore and a comment
 says so (`List` -> `List_`) — cosmetic only.
 
 ## 4. Path-condition asserts

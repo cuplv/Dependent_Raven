@@ -12,8 +12,11 @@ the arm's pattern bindings as path conditions and the instantiated
 postcondition of every lemma/recursive call as a context fact. Each VC is
 then negated, A-normalized (this is where `anf_*` names are born — one per
 intermediate value), relationally abstracted (functions become relations —
-this is where `*_rel` is born), and sent to Z3. `sat` means a countermodel
-exists: the failure. The counterexample file is projected from data
+this is where `*_rel` is born), written to `logs/<goal>_failed_query.smt2`
+and solved by cvc5: two processes race on the file, `--full-saturate-quant`
+(finds the refutation, `unsat`) and `--finite-model-find` (finds the
+countermodel, `sat`); the first definitive answer wins. `sat` means a
+countermodel exists: the failure. The counterexample file is projected from data
 UPSTREAM of these passes, which is why it contains none of these names.
 
 ## Source -> SMT mapping
