@@ -14,7 +14,7 @@
 //! definitive answer decides and the other process is killed.
 //!
 //! `RAVENCHECK_SOLVER=z3` selects z3 (one process). `RAVENCHECK_TIMEOUT` is the
-//! per-goal limit in seconds (default 60; `0` = none). A goal with no definitive
+//! per-goal limit in seconds (default 30; `0` = none). A goal with no definitive
 //! answer in time is `Unknown`; a countermodel of AVL size can take hours to
 //! find, and the counterexample file does not need one.
 //! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고, 솔버를 그 파일에 대한 하위
@@ -94,7 +94,7 @@ fn solve_file(path: &str) -> Verdict {
     let limit: u64 = std::env::var("RAVENCHECK_TIMEOUT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(60);
+        .unwrap_or(30);
 
     // The solvers enforce the limit themselves; the deadline below only covers
     // one that fails to.

@@ -2,7 +2,11 @@
 
 The tool implements counterexample-guided quantifier instantiation (CEGQI)
 over a decidable fragment (EPR): every VC's sat/unsat answer is definitive
-— `sat` is a real countermodel, never a solver timeout or "unknown". Three
+— `sat` is a real countermodel, `unsat` a proof. The driver also has a
+per-goal time limit; a goal that exceeds it is reported UNKNOWN. That is
+a resource verdict, not a logical one: the query still has an answer, and
+in practice it is a `sat` whose countermodel was too large to find in
+time. Treat an UNKNOWN goal as a failing goal. Three
 consequences of the theory bear directly on this skill's decisions; they
 are all you need.
 

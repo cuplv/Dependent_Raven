@@ -9,6 +9,13 @@ running `cvc5 --finite-model-find` on it yields `sat` (the countermodel
 exists). Use that configuration, not z3 or plain cvc5: on a satisfiable
 query of AVL size z3 does not terminate and cvc5's default answers `unknown`.
 
+The second line of the file is `; verdict: sat` or `; verdict: unknown`.
+`sat`: the solver found a countermodel. `unknown`: no answer within the
+per-goal time limit; the file has exactly the same content (it is built
+from the goal and its ledger, never from a model), so every section below
+and the frontier procedure apply unchanged — only the certainty that a
+countermodel exists is missing.
+
 Full real instances live in `../fixtures/*_counterexample.smt2`. The
 sections, in file order:
 

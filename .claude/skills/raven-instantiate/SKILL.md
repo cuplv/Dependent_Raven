@@ -3,7 +3,9 @@ name: raven-instantiate
 description: Diagnose a failed ravencheck proof and find missing instantiate!
   hints by analyzing the generated counterexample file
   (logs/<goal>_counterexample.smt2). Use when a test_suite proof fails with
-  "solver found counterexamples". Finds missing instantiations only; when
+  "solver found counterexamples" or "solver returned UNKNOWN" (no answer
+  within the per-goal time limit; the file is written in both cases).
+  Finds missing instantiations only; when
   instantiation cannot fix the failure, produces a named diagnosis (missing
   lemma / missing case split / missing recursive call) instead of forcing
   a fix.
@@ -46,8 +48,15 @@ silently vacuous. Why this is so is visible in the query text: see
 - Run tests from `test_suite/`: `cargo test --test <file>` (file =
   `tests/<file>.rs`).
 - One run solves EVERY goal and reports EVERY failing one (it does not
-  stop at the first). Each failure names its goal `<lemma>_vc_<k>` and
-  writes `test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`. The lemma
+  stop at the first). A goal fails either with "solver found
+  counterexamples" (`sat`) or with "solver returned UNKNOWN" (no answer
+  within the per-goal limit, 30 s by default, `RAVENCHECK_TIMEOUT` to
+  change). Both write `test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`;
+  the file's `; verdict:` line says which. The file is built from the
+  goal and its ledger, not from a solver model, so the procedure below is
+  the same for both verdicts. An UNKNOWN goal is usually a goal whose
+  countermodel is large (many hypotheses and witnesses); it is not
+  evidence that the goal is provable. The lemma
   is a `#[val(... -> Lemma(...))]` function in some `tests/*.rs`; the
   counterexample's `branch :` line identifies the match arm the VC belongs
   to — that arm is where hints go. Goals are numbered per generated
