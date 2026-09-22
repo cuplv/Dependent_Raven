@@ -63,7 +63,7 @@ use dissect::{Core, VcParts};
 ///       Callers must treat errors (and panics) as warnings only: a
 ///       failure to emit the counterexample must never mask the
 ///       verification failure.
-pub fn emit(program: &Program, goal: &Goal, path: &str) -> Result<(), String> {
+pub fn emit(program: &Program, goal: &Goal, verdict: &str, path: &str) -> Result<(), String> {
     let parts = dissect::dissect(&goal.property);
     let terms: Vec<&Expr> = goal.instantiations.iter().collect();
 
@@ -80,6 +80,10 @@ pub fn emit(program: &Program, goal: &Goal, path: &str) -> Result<(), String> {
 
     let mut out = String::new();
     out.push_str("; ravencheck counterexample\n");
+    // [ENG] `sat`: the solver found a countermodel. `unknown`: no answer within
+    //       the time limit; the file is still the goal's ledger view and the
+    //       frontier procedure applies, but no countermodel is known to exist.
+    out.push_str(&format!("; verdict: {}\n", verdict));
     out.push_str(&format!("; lemma  : {}\n", lemma_line(&goal.name)));
     out.push_str(&format!("; goal   : {}\n", render_goal(&parts)));
     if !parts.path_conds.is_empty() {

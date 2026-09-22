@@ -415,63 +415,69 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
         ctx.assert(goal_smt);
 
-        match ctx.solve(&smt_log_path) {
-            Verdict::Sat => {
-                // [KOR] 반례 파일을 소스 어휘로 방출합니다. 방출 실패가 검증 실패
-                //       보고 자체를 가리면 안 되므로, 에러는 경고로만 출력합니다.
-                // [ENG] Emit the counterexample file in source vocabulary. Emission
-                //       failure must never mask the verification failure itself,
-                //       so its error is only printed as a warning.
-                let cex_path = format!("logs/{}_counterexample.smt2", goal_name);
-                let mut cex_written = false;
-                if let Some(src_goal) = program.goals.iter().find(|g| g.name == goal_name) {
-                    // [KOR] 방출기 내부의 불변식 panic도 경고로 낮춥니다.
-                    // [ENG] Invariant panics inside the emitter are also
-                    //       downgraded to warnings.
-                    let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        crate::cex::emit(&program, src_goal, &cex_path)
-                    }));
-                    match emitted {
-                        Ok(Ok(())) => cex_written = true,
-                        Ok(Err(e)) => {
-                            println!("  ⚠️ Failed to write counterexample {}: {}", cex_path, e)
-                        }
-                        Err(_) => println!(
-                            "  ⚠️ Counterexample generation panicked; {} was not written",
-                            cex_path
-                        ),
+        let verdict = ctx.solve(&smt_log_path);
+        if verdict != Verdict::Unsat {
+            // [KOR] 반례 파일을 소스 어휘로 방출합니다. 파일은 goal과 그 인스턴스화
+            //       목록(ledger)에서 만들어지며 solver 모델을 읽지 않으므로, 답이
+            //       UNKNOWN(시간 초과)이어도 쓸 수 있습니다. 방출 실패가 검증 실패
+            //       보고 자체를 가리면 안 되므로, 에러는 경고로만 출력합니다.
+            // [ENG] Emit the counterexample file in source vocabulary. It is built
+            //       from the goal and its instantiation list (the ledger), never
+            //       from a solver model, so it is written for an UNKNOWN (timed
+            //       out) goal as well. Emission failure must never mask the
+            //       verification failure itself, so its error is only printed as
+            //       a warning.
+            let cex_path = format!("logs/{}_counterexample.smt2", goal_name);
+            let mut cex_written = false;
+            if let Some(src_goal) = program.goals.iter().find(|g| g.name == goal_name) {
+                let label = if verdict == Verdict::Sat { "sat" } else { "unknown" };
+                // [KOR] 방출기 내부의 불변식 panic도 경고로 낮춥니다.
+                // [ENG] Invariant panics inside the emitter are also
+                //       downgraded to warnings.
+                let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::cex::emit(&program, src_goal, label, &cex_path)
+                }));
+                match emitted {
+                    Ok(Ok(())) => cex_written = true,
+                    Ok(Err(e)) => {
+                        println!("  ⚠️ Failed to write counterexample {}: {}", cex_path, e)
                     }
+                    Err(_) => println!(
+                        "  ⚠️ Counterexample generation panicked; {} was not written",
+                        cex_path
+                    ),
                 }
-                // Only advertise the counterexample file if it was actually written.
-                let cex_line = if cex_written {
-                    format!("\n## > 💾 Counterexample: {}", cex_path)
-                } else {
-                    String::new()
-                };
-                failures.push(format!(
+            }
+            // Only advertise the counterexample file if it was actually written.
+            let cex_line = if cex_written {
+                format!("\n## > 💾 Counterexample: {}", cex_path)
+            } else {
+                String::new()
+            };
+            failures.push(if verdict == Verdict::Sat {
+                format!(
                     "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}{}",
                     goal_name, smt_log_path, cex_line
-                ));
+                )
+            } else {
+                format!(
+                    "Verification of '{}' cannot proceed: solver returned UNKNOWN (no answer within the time limit).\n## > 💾 Check the SMT query at: {}{}",
+                    goal_name, smt_log_path, cex_line
+                )
+            });
+        }
+        if verdict == Verdict::Unsat {
+            // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
+            // Set RAVENCHECK_KEEP_QUERIES to keep the query of a verified goal
+            // (to inspect a passing VC's query, or to measure query sizes and
+            // solver times). The file keeps its replay-file name.
+            if std::env::var("RAVENCHECK_KEEP_QUERIES").is_err() {
+                let _ = fs::remove_file(&smt_log_path);
             }
-            Verdict::Unknown => {
-                failures.push(format!(
-                    "Verification of '{}' cannot proceed: solver returned UNKNOWN.\n## > 💾 Check the SMT query at: {}",
-                    goal_name, smt_log_path
-                ));
-            }
-            Verdict::Unsat => {
-                // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
-                // Set RAVENCHECK_KEEP_QUERIES to keep the query of a verified goal
-                // (to inspect a passing VC's query, or to measure query sizes and
-                // solver times). The file keeps its replay-file name.
-                if std::env::var("RAVENCHECK_KEEP_QUERIES").is_err() {
-                    let _ = fs::remove_file(&smt_log_path);
-                }
-                println!(
-                    "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
-                    goal_name
-                );
-            }
+            println!(
+                "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
+                goal_name
+            );
         }
     }
 

@@ -13,8 +13,10 @@
 //! Every query is in EPR, so exactly one of the two is in its element; the first
 //! definitive answer decides and the other process is killed.
 //!
-//! `RAVENCHECK_SOLVER=z3` selects z3 (one process). There is no time limit: a run
-//! waits until a solver answers.
+//! `RAVENCHECK_SOLVER=z3` selects z3 (one process). `RAVENCHECK_TIMEOUT` is the
+//! per-goal limit in seconds (default 60; `0` = none). A goal with no definitive
+//! answer in time is `Unknown`; a countermodel of AVL size can take hours to
+//! find, and the counterexample file does not need one.
 //! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고, 솔버를 그 파일에 대한 하위
 //! 프로세스로 실행합니다. 프로세스를 직접 소유하므로 두 솔버 설정의 경주가
 //! 가능합니다: 먼저 확정 답을 낸 쪽이 결정하고 나머지는 종료됩니다.
@@ -23,10 +25,10 @@ use easy_smt::{Context, ContextBuilder, SExpr};
 use std::fs;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// [KOR] 솔버의 답. `Unknown`은 어느 프로세스도 확정 답을 내지 못했다는 뜻입니다.
-/// [ENG] The solver's answer. `Unknown`: no process gave a definitive answer.
+/// [KOR] 솔버의 답. `Unknown`은 시간 제한 안에 어느 프로세스도 확정 답을 내지 못했다는 뜻입니다.
+/// [ENG] The solver's answer. `Unknown`: no process gave a definitive answer in time.
 #[derive(Debug, PartialEq)]
 pub enum Verdict {
     Sat,
@@ -89,18 +91,35 @@ impl Query {
 
 fn solve_file(path: &str) -> Verdict {
     let solver = std::env::var("RAVENCHECK_SOLVER").unwrap_or_else(|_| "cvc5".to_string());
+    let limit: u64 = std::env::var("RAVENCHECK_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
 
-    let mut running: Vec<Child> = match solver.as_str() {
-        "cvc5" => ["--full-saturate-quant", "--finite-model-find"]
+    // The solvers enforce the limit themselves; the deadline below only covers
+    // one that fails to.
+    let mut running: Vec<Child> = match (solver.as_str(), limit) {
+        ("cvc5", 0) => ["--full-saturate-quant", "--finite-model-find"]
             .iter()
             .map(|strategy| spawn("cvc5", &["--lang", "smt2", strategy, path]))
             .collect(),
-        "z3" => vec![spawn("z3", &["-smt2", path])],
-        other => panic!("RAVENCHECK_SOLVER must be `cvc5` or `z3`, got `{}`", other),
+        ("cvc5", _) => ["--full-saturate-quant", "--finite-model-find"]
+            .iter()
+            .map(|strategy| {
+                spawn("cvc5", &["--lang", "smt2", strategy, &format!("--tlimit={}", limit * 1000), path])
+            })
+            .collect(),
+        ("z3", 0) => vec![spawn("z3", &["-smt2", path])],
+        ("z3", _) => vec![spawn("z3", &["-smt2", &format!("-T:{}", limit), path])],
+        (other, _) => panic!("RAVENCHECK_SOLVER must be `cvc5` or `z3`, got `{}`", other),
     };
 
+    let deadline = (limit > 0).then(|| Instant::now() + Duration::from_secs(limit + 5));
     let mut verdict = Verdict::Unknown;
-    while !running.is_empty() && verdict == Verdict::Unknown {
+    while !running.is_empty()
+        && verdict == Verdict::Unknown
+        && deadline.map_or(true, |d| Instant::now() < d)
+    {
         let mut still_running = Vec::new();
         for mut child in running {
             match child.try_wait().expect("Failed to poll the solver process") {
@@ -134,7 +153,7 @@ fn spawn(program: &str, args: &[&str]) -> Child {
 }
 
 /// [ENG] The first line of a finished solver's output. Anything but `sat`/`unsat`
-///       (`unknown`, an error) is not a definitive answer.
+///       (`unknown`, a timeout message, an error) is not a definitive answer.
 fn read_verdict(child: &mut Child) -> Verdict {
     let mut out = String::new();
     if let Some(stdout) = child.stdout.as_mut() {
