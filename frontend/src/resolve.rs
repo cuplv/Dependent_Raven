@@ -52,6 +52,19 @@ pub fn resolve_pattern_types(
     expr: &mut Expr,
     datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
 ) {
+    // A match on a tuple is first compiled into matches on single variables; the
+    // result is then resolved like any other expression.
+    let compiled = match expr {
+        Expr::Match { expr: target, arms } => match &**target {
+            Expr::Tuple(components) => Some(compile_tuple_match(components, arms, datatypes)),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(nested) = compiled {
+        *expr = nested;
+    }
+
     match expr {
         Expr::Let { pat, bound_expr, body } => {
             resolve_in_pattern(pat, datatypes);
@@ -99,6 +112,131 @@ pub fn resolve_pattern_types(
             }
         }
         Expr::BoolConst(_) | Expr::Var(_) => {}
+    }
+}
+
+/// [ENG] Compiles `match (a, b, ..) { rows }` into nested matches on the single
+/// variables `a`, `b`, .. -- the only match form the checker and the backend
+/// handle. Rows are tried in source order (Rust's first-match semantics), so rows
+/// may overlap and a bare `_` row stands for "any tuple"; the matches produced
+/// have one arm per constructor and are therefore disjoint by construction.
+/// [KOR] 튜플에 대한 match를 단일 변수들에 대한 중첩 match로 컴파일합니다. 행은 소스
+/// 순서대로 시도되므로(Rust의 first-match) 행들이 겹쳐도 됩니다. 만들어지는 match는
+/// 생성자마다 arm이 하나라서 구성상 서로소입니다.
+fn compile_tuple_match(
+    components: &[Expr],
+    arms: &[(Pattern, Expr)],
+    datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
+) -> Expr {
+    let scrutinees: Vec<Ident> = components
+        .iter()
+        .map(|c| match c {
+            Expr::Var(name) => name.clone(),
+            other => panic!(
+                "the components of a tuple match must be variables, got {:?}; \
+                 bind it with `let` first",
+                other
+            ),
+        })
+        .collect();
+    let rows: Vec<(Vec<Pattern>, Expr)> = arms
+        .iter()
+        .map(|(pat, body)| match pat {
+            Pattern::Tuple(ps) if ps.len() == scrutinees.len() => (ps.clone(), body.clone()),
+            Pattern::Wildcard => (vec![Pattern::Wildcard; scrutinees.len()], body.clone()),
+            other => panic!(
+                "a match on a {}-tuple needs {}-tuple patterns or `_`, got `{}`",
+                scrutinees.len(), scrutinees.len(), render_pattern(other)
+            ),
+        })
+        .collect();
+    if rows.is_empty() {
+        panic!("a tuple match needs at least one arm");
+    }
+    compile_rows(&scrutinees, rows, datatypes)
+}
+
+/// [ENG] One step of the decision tree: `rows[i].0[j]` is the pattern row `i` has
+/// for `scrutinees[j]`. The first column is eliminated, either by binding (no row
+/// tests it) or by a match on its constructors; with no columns left, the first
+/// remaining row is the one Rust would have taken.
+fn compile_rows(
+    scrutinees: &[Ident],
+    rows: Vec<(Vec<Pattern>, Expr)>,
+    datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
+) -> Expr {
+    let Some((scrutinee, rest)) = scrutinees.split_first() else {
+        return rows.into_iter().next().expect("checked non-empty by the caller").1;
+    };
+
+    // The datatype of this column, read off the first row that tests it.
+    let tested = rows.iter().find_map(|(pats, _)| match &pats[0] {
+        Pattern::Constructor { name, .. } => name.rsplit_once("::").map(|(e, _)| e.to_string()),
+        _ => None,
+    });
+    let Some(enum_name) = tested else {
+        let rows = rows
+            .into_iter()
+            .map(|(pats, body)| (pats[1..].to_vec(), bind(&pats[0], scrutinee, body)))
+            .collect();
+        return compile_rows(rest, rows, datatypes);
+    };
+
+    let variants = datatypes.get(&enum_name).unwrap_or_else(|| panic!(
+        "Pattern resolution: unknown datatype '{}' in a tuple match", enum_name
+    ));
+    let arms = variants
+        .iter()
+        .map(|(variant, field_types)| {
+            let name = format!("{}::{}", enum_name, variant);
+            let fields: Vec<Ident> = field_types
+                .iter()
+                .map(|_| match crate::parser::name_nested_wildcards(Pattern::Wildcard) {
+                    Pattern::Ident(fresh) => fresh,
+                    _ => unreachable!("a wildcard is named by an identifier"),
+                })
+                .collect();
+            // Rows that can still match once this column is known to be `name(..)`:
+            // their sub-patterns become the columns for the fields.
+            let sub_rows: Vec<(Vec<Pattern>, Expr)> = rows
+                .iter()
+                .filter_map(|(pats, body)| match &pats[0] {
+                    Pattern::Constructor { name: n, args, .. } if *n == name => {
+                        Some(([&args[..], &pats[1..]].concat(), body.clone()))
+                    }
+                    Pattern::Constructor { .. } => None,
+                    irrefutable => Some((
+                        [&vec![Pattern::Wildcard; fields.len()][..], &pats[1..]].concat(),
+                        bind(irrefutable, scrutinee, body.clone()),
+                    )),
+                })
+                .collect();
+            if sub_rows.is_empty() {
+                panic!("tuple match is not exhaustive: no row covers `{}`", name);
+            }
+            let columns = [&fields[..], rest].concat();
+            let pattern = Pattern::Constructor {
+                name,
+                args: fields.into_iter().map(Pattern::Ident).collect(),
+                arg_types: None,
+            };
+            (pattern, compile_rows(&columns, sub_rows, datatypes))
+        })
+        .collect();
+    Expr::Match { expr: Box::new(Expr::Var(scrutinee.clone())), arms }
+}
+
+/// [ENG] A row's binder for a column becomes `let x = scrutinee` around its body;
+/// a wildcard binds nothing.
+fn bind(pat: &Pattern, scrutinee: &Ident, body: Expr) -> Expr {
+    match pat {
+        Pattern::Ident(x) => Expr::Let {
+            pat: Pattern::Ident(x.clone()),
+            bound_expr: Box::new(Expr::Var(scrutinee.clone())),
+            body: Box::new(body),
+        },
+        Pattern::Wildcard => body,
+        other => panic!("nested tuple pattern `{}` is not supported", render_pattern(other)),
     }
 }
 
