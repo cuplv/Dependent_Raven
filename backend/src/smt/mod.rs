@@ -15,7 +15,7 @@ use crate::smt::axioms::{
     subterm_step_axiom, subterm_transitivity_axiom,
 };
 use crate::smt::builder::{expr_to_smt, render_sort, sanitize_id};
-use crate::smt::solver::SolverConfig;
+use crate::smt::solver::{Query, Verdict};
 use frontend::ast::{BaseType, BinOp, Expr, Ident, Pattern, Program, Type, UnOp};
 use frontend::typechecking::pattern_to_expr;
 
@@ -200,31 +200,33 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     }
 
     // 3. SMT 인코딩 및 실행
-    let mut config = SolverConfig::default();
-
     // 로그 폴더가 없으면 미리 생성합니다.
     let _ = fs::create_dir_all("logs");
+
+    // [KOR] 실패한 goal마다 보고 한 건. 첫 실패에서 멈추지 않고 모든 goal을 풉니다.
+    // [ENG] One report per failing goal. Every goal is solved; the run does not
+    //       stop at the first failure.
+    let mut failures: Vec<String> = Vec::new();
 
     for goal in processed_goals {
         let goal_name = goal.name;
         println!(" Solving Goal: {}", goal_name);
 
-        // 무조건 .smt2 파일에 로그를 남기도록 설정합니다.
+        // [KOR] 질의는 항상 이 .smt2 파일에 쓰이고, 솔버는 그 파일에 대해 실행됩니다.
+        // [ENG] The query is always written to this .smt2 file; the solver runs on it.
         let smt_log_path = format!("logs/{}_failed_query.smt2", goal_name);
-        config.set_log_file(smt_log_path.clone());
 
-        let mut builder = config.context_builder();
-        let mut ctx = builder.build().expect("Failed to build SMT context");
-        ctx.set_logic("ALL").unwrap();
+        let mut ctx = Query::new();
 
         // [KOR] Unit 소트 선언 (프론트엔드에서 넘어올 수 있으므로)
-        ctx.declare_sort("Unit", 0).unwrap();
-        ctx.declare_const("unit_val", ctx.atom("Unit")).unwrap();
+        ctx.declare_sort("Unit".to_string());
+        let unit_sort = ctx.smt.atom("Unit");
+        ctx.declare_const("unit_val".to_string(), unit_sort);
 
         // 3.1. 소트(Sort) 선언
         for (enum_name, _) in &program.datatypes {
             let sort_name = render_sort(&BaseType::Custom(enum_name.clone()));
-            ctx.declare_sort(sort_name, 0).unwrap();
+            ctx.declare_sort(sort_name);
         }
 
         // 3.2. 데이터 생성자 (Constructors) 및 공리 선언
@@ -239,16 +241,14 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             let sub_rel = sanitize_id(&format!("{}::subterm", enum_name));
             if has_recursive_field {
                 let sub_args = vec![ctx.atom(render_sort(&out_type)), ctx.atom(render_sort(&out_type))];
-                ctx.declare_fun(sub_rel.clone(), sub_args, ctx.atom("Bool"))
-                    .unwrap();
+                ctx.declare_fun(sub_rel.clone(), sub_args, ctx.atom("Bool"));
             }
 
             for (cons_name, arg_types) in variants {
                 if arg_types.is_empty() {
                     // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
                     let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name));
-                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type)))
-                        .unwrap();
+                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type)));
                     // 상수는 Functionality와 Injectivity 공리가 필요 없습니다.
                 } else {
                     // [KOR] 인자가 있는 생성자 (예: Nat::S)는 관계식으로 변환됨
@@ -261,26 +261,25 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                     smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
 
                     // (declare-fun ...)
-                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"))
-                        .unwrap();
+                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
 
                     // Functionality Axiom
                     let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
-                    let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
-                    ctx.assert(func_ax_smt).unwrap();
+                    let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
+                    ctx.assert(func_ax_smt);
 
                     // Injectivity Axiom
                     let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
-                    let inj_ax_smt = expr_to_smt(&mut ctx, &inj_ax).unwrap();
-                    ctx.assert(inj_ax_smt).unwrap();
+                    let inj_ax_smt = expr_to_smt(&mut ctx.smt, &inj_ax).unwrap();
+                    ctx.assert(inj_ax_smt);
 
                     // Subterm Step Axiom: each recursive field is a proper subterm of the result.
                     for (i, ty) in arg_types.iter().enumerate() {
                         if *ty == out_type {
                             let step_ax =
                                 subterm_step_axiom(&rel_name, arg_types, i, &sub_rel, &out_type);
-                            let step_ax_smt = expr_to_smt(&mut ctx, &step_ax).unwrap();
-                            ctx.assert(step_ax_smt).unwrap();
+                            let step_ax_smt = expr_to_smt(&mut ctx.smt, &step_ax).unwrap();
+                            ctx.assert(step_ax_smt);
                         }
                     }
                 }
@@ -294,8 +293,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
 
                     let disj_ax =
                         disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
-                    let disj_ax_smt = expr_to_smt(&mut ctx, &disj_ax).unwrap();
-                    ctx.assert(disj_ax_smt).unwrap();
+                    let disj_ax_smt = expr_to_smt(&mut ctx.smt, &disj_ax).unwrap();
+                    ctx.assert(disj_ax_smt);
                 }
             }
 
@@ -307,8 +306,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                     subterm_transitivity_axiom(&sub_rel, &out_type),
                     subterm_irreflexivity_axiom(&sub_rel, &out_type),
                 ] {
-                    let ax_smt = expr_to_smt(&mut ctx, &ax).unwrap();
-                    ctx.assert(ax_smt).unwrap();
+                    let ax_smt = expr_to_smt(&mut ctx.smt, &ax).unwrap();
+                    ctx.assert(ax_smt);
                 }
             }
         }
@@ -335,12 +334,11 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             }
             smt_args.push(ctx.atom(render_sort(&out_type)));
 
-            ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"))
-                .unwrap();
+            ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
 
             let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
-            let func_ax_smt = expr_to_smt(&mut ctx, &func_ax).unwrap();
-            ctx.assert(func_ax_smt).unwrap();
+            let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
+            ctx.assert(func_ax_smt);
         }
 
         for (func_name, def) in &program.functions {
@@ -403,23 +401,22 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // 3.4. Skolem Variables 및 Instantiations 추가
         // [KOR] Phase 2에서 뽑아낸 전역 상수(Skolem variables)들을 선언합니다.
         for (var_name, var_type) in &goal.skolem_vars {
-            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type)))
-                .unwrap();
+            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type)));
         }
 
         // [KOR] Phase 3에서 변환한 인스턴스화 공리들을 각각 별도의 assert(exists ...) 구문으로 꽂아 넣습니다.
         for inst_expr in &goal.instantiations {
-            let inst_smt = expr_to_smt(&mut ctx, inst_expr).unwrap();
-            ctx.assert(inst_smt).unwrap();
+            let inst_smt = expr_to_smt(&mut ctx.smt, inst_expr).unwrap();
+            ctx.assert(inst_smt);
         }
 
         // 3.5. 최종 검증 (Assert negated goal and check-sat)
-        let goal_smt = expr_to_smt(&mut ctx, &goal.relabs_expr).unwrap();
+        let goal_smt = expr_to_smt(&mut ctx.smt, &goal.relabs_expr).unwrap();
         // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
-        ctx.assert(goal_smt).unwrap();
+        ctx.assert(goal_smt);
 
-        match ctx.check().unwrap() {
-            easy_smt::Response::Sat => {
+        match ctx.solve(&smt_log_path) {
+            Verdict::Sat => {
                 // [KOR] 반례 파일을 소스 어휘로 방출합니다. 방출 실패가 검증 실패
                 //       보고 자체를 가리면 안 되므로, 에러는 경고로만 출력합니다.
                 // [ENG] Emit the counterexample file in source vocabulary. Emission
@@ -451,18 +448,18 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 } else {
                     String::new()
                 };
-                return Err(format!(
+                failures.push(format!(
                     "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}{}",
                     goal_name, smt_log_path, cex_line
                 ));
             }
-            easy_smt::Response::Unknown => {
-                return Err(format!(
-                    "Verification of '{}' cannot proceed: solver returned UNKNOWN.\n## > 💾 Check the SMT query at: {}", 
+            Verdict::Unknown => {
+                failures.push(format!(
+                    "Verification of '{}' cannot proceed: solver returned UNKNOWN.\n## > 💾 Check the SMT query at: {}",
                     goal_name, smt_log_path
                 ));
             }
-            easy_smt::Response::Unsat => {
+            Verdict::Unsat => {
                 // 성공: 테스트가 통과했으므로 쓸모없는 로그 파일을 삭제하여 폴더를 깔끔하게 유지합니다.
                 // Set RAVENCHECK_KEEP_QUERIES to keep the query of a verified goal
                 // (to inspect a passing VC's query, or to measure query sizes and
@@ -478,7 +475,11 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         }
     }
 
-    Ok(())
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n##\n## > "))
+    }
 }
 
 /// Recursively traverses a function body to flatten nested `Match` expressions.
@@ -491,7 +492,7 @@ fn generate_axioms_from_body(
     func_name: &str,
     params: &[(Ident, BaseType)],
     guards: &[Expr],
-    ctx: &mut easy_smt::Context,
+    ctx: &mut Query,
     program: &Program,
 ) {
     if let Expr::Match {
@@ -690,7 +691,7 @@ fn generate_axioms_from_body(
         let relabs_expr = relabs_transform(&nnf_expr, &program.functions);
 
         // Convert the fully processed relation expression to SMT-LIB2 format and assert it.
-        let smt_expr = expr_to_smt(ctx, &relabs_expr).unwrap();
-        ctx.assert(smt_expr).unwrap();
+        let smt_expr = expr_to_smt(&mut ctx.smt, &relabs_expr).unwrap();
+        ctx.assert(smt_expr);
     }
 }

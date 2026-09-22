@@ -1,70 +1,148 @@
 //! backend/src/smt/solver.rs
-//! SMT 솔버(Z3 등)와의 통신 및 프로세스 관리를 담당하는 모듈
+//! SMT 질의 파일 작성과 솔버 프로세스 실행을 담당하는 모듈
+//!
+//! [ENG] A goal's query is written to a file as SMT-LIB text and the solver runs on
+//! that file as a subprocess. Owning the process (instead of talking to one over an
+//! interactive pipe) is what allows a race between two solver configurations:
+//!
+//!   - `cvc5 --full-saturate-quant`  proves (unsat), but does not terminate on a
+//!     satisfiable query of AVL size;
+//!   - `cvc5 --finite-model-find`    finds the countermodel (sat) quickly, but does
+//!     not terminate on the hard unsat queries.
+//!
+//! Every query is in EPR, so exactly one of the two is in its element; the first
+//! definitive answer decides and the other process is killed.
+//!
+//! `RAVENCHECK_SOLVER=z3` selects z3 (one process). There is no time limit: a run
+//! waits until a solver answers.
+//! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고, 솔버를 그 파일에 대한 하위
+//! 프로세스로 실행합니다. 프로세스를 직접 소유하므로 두 솔버 설정의 경주가
+//! 가능합니다: 먼저 확정 답을 낸 쪽이 결정하고 나머지는 종료됩니다.
 
-use easy_smt::{ContextBuilder};
-use std::fs::File;
+use easy_smt::{Context, ContextBuilder, SExpr};
+use std::fs;
+use std::io::Read;
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
-/// [KOR] SMT 솔버의 실행 환경 및 옵션을 설정하는 구조체입니다.
-/// [ENG] A struct that configures the execution environment and options for the SMT solver.
-#[derive(Debug)]
-pub struct SolverConfig {
-    program: String,
-    args: Vec<String>,
-    log_file: Option<String>, // SMT 쿼리를 저장할 파일명
+/// [KOR] 솔버의 답. `Unknown`은 어느 프로세스도 확정 답을 내지 못했다는 뜻입니다.
+/// [ENG] The solver's answer. `Unknown`: no process gave a definitive answer.
+#[derive(Debug, PartialEq)]
+pub enum Verdict {
+    Sat,
+    Unsat,
+    Unknown,
 }
 
-impl SolverConfig {
-    /// [KOR] 기본 솔버로 Z3를 사용합니다. CVC5보다 빠르고 설치가 쉽습니다.
-    /// [ENG] Uses Z3 as the default solver. It's generally faster and easier to install than CVC5.
-    pub fn default() -> Self {
-        Self::z3()
+/// [KOR] 하나의 goal에 대한 SMT-LIB 질의를 텍스트로 쌓습니다. `smt`는 식을 만들고
+///       출력하는 데만 쓰이는, 솔버 없는 easy-smt 컨텍스트입니다.
+/// [ENG] Accumulates one goal's SMT-LIB query as text. `smt` is a solver-less
+///       easy-smt context, used only to build and print expressions.
+pub struct Query {
+    pub smt: Context,
+    text: String,
+}
+
+impl Query {
+    pub fn new() -> Self {
+        let smt = ContextBuilder::new().build().expect("Failed to build SMT context");
+        Query { smt, text: String::from("(set-logic ALL)\n") }
     }
 
-    /// [KOR] Z3 솔버를 SMT2 모드로 실행하기 위한 기본 설정을 반환합니다.
-    /// [ENG] Returns the default configuration to run the Z3 solver in SMT2 mode.
-    pub fn z3() -> Self {
-        Self {
-            program: "z3".to_string(),
-            args: vec!["-smt2".to_string(), "-in".to_string()],
-            log_file: None,
-        }
+    pub fn atom(&self, name: impl Into<String> + AsRef<str>) -> SExpr {
+        self.smt.atom(name)
     }
 
-    /// [KOR] CVC5 솔버를 실행하기 위한 설정을 반환합니다. (기존 Ravencheck 호환용)
-    /// [ENG] Returns the configuration to run the CVC5 solver. (For compatibility with legacy Ravencheck)
-    pub fn cvc5() -> Self {
-        Self {
-            program: "cvc5".to_string(),
-            args: vec![
-                "--lang".to_string(), "smt2".to_string(),
-                "--force-logic".to_string(), "ALL".to_string(),
-                "--full-saturate-quant".to_string(),
-                "--finite-model-find".to_string(),
-            ],
-            log_file: None,
-        }
+    fn command(&mut self, parts: Vec<SExpr>) {
+        let cmd = self.smt.list(parts);
+        self.text.push_str(&format!("{}\n", self.smt.display(cmd)));
     }
 
-    /// [KOR] SMT 쿼리를 파일로 저장(로깅)할 경로를 지정합니다.
-    /// [ENG] Sets the path to save (log) the SMT queries.
-    pub fn set_log_file(&mut self, filename: String) {
-        self.log_file = Some(filename);
+    pub fn declare_sort(&mut self, name: String) {
+        let parts = vec![self.smt.atom("declare-sort"), self.smt.atom(name), self.smt.atom("0")];
+        self.command(parts);
     }
 
-    /// [KOR] 설정된 정보를 바탕으로 easy_smt::ContextBuilder를 생성합니다.
-    /// [ENG] Creates an easy_smt::ContextBuilder based on the configured information.
-    pub fn context_builder(&self) -> ContextBuilder {
-        let mut builder = ContextBuilder::new();
-        builder.solver(&self.program, &self.args);
-        
-        // [KOR] 로깅이 활성화되어 있다면, 솔버로 보내는 모든 S-Expr을 파일에도 똑같이 씁니다.
-        // [ENG] If logging is enabled, mirror all S-Exprs sent to the solver to the file.
-        if let Some(filename) = &self.log_file {
-            if let Ok(file) = File::create(filename) {
-                builder.replay_file(Some(file));
+    pub fn declare_const(&mut self, name: String, sort: SExpr) {
+        let parts = vec![self.smt.atom("declare-const"), self.smt.atom(name), sort];
+        self.command(parts);
+    }
+
+    pub fn declare_fun(&mut self, name: String, args: Vec<SExpr>, out: SExpr) {
+        let args = self.smt.list(args);
+        let parts = vec![self.smt.atom("declare-fun"), self.smt.atom(name), args, out];
+        self.command(parts);
+    }
+
+    pub fn assert(&mut self, expr: SExpr) {
+        let parts = vec![self.smt.atom("assert"), expr];
+        self.command(parts);
+    }
+
+    /// [ENG] Writes the query, closed by `(check-sat)`, to `path` and solves it.
+    pub fn solve(&self, path: &str) -> Verdict {
+        fs::write(path, format!("{}(check-sat)\n", self.text))
+            .unwrap_or_else(|e| panic!("Failed to write SMT query {}: {}", path, e));
+        solve_file(path)
+    }
+}
+
+fn solve_file(path: &str) -> Verdict {
+    let solver = std::env::var("RAVENCHECK_SOLVER").unwrap_or_else(|_| "cvc5".to_string());
+
+    let mut running: Vec<Child> = match solver.as_str() {
+        "cvc5" => ["--full-saturate-quant", "--finite-model-find"]
+            .iter()
+            .map(|strategy| spawn("cvc5", &["--lang", "smt2", strategy, path]))
+            .collect(),
+        "z3" => vec![spawn("z3", &["-smt2", path])],
+        other => panic!("RAVENCHECK_SOLVER must be `cvc5` or `z3`, got `{}`", other),
+    };
+
+    let mut verdict = Verdict::Unknown;
+    while !running.is_empty() && verdict == Verdict::Unknown {
+        let mut still_running = Vec::new();
+        for mut child in running {
+            match child.try_wait().expect("Failed to poll the solver process") {
+                Some(_) if verdict == Verdict::Unknown => verdict = read_verdict(&mut child),
+                Some(_) => {}
+                None => still_running.push(child),
             }
         }
-        
-        builder
+        running = still_running;
+        if verdict == Verdict::Unknown {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    for mut child in running {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    verdict
+}
+
+fn spawn(program: &str, args: &[&str]) -> Child {
+    Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap_or_else(|e| panic!(
+            "Failed to start `{}` ({}); install it, or choose the solver with RAVENCHECK_SOLVER=cvc5|z3",
+            program, e
+        ))
+}
+
+/// [ENG] The first line of a finished solver's output. Anything but `sat`/`unsat`
+///       (`unknown`, an error) is not a definitive answer.
+fn read_verdict(child: &mut Child) -> Verdict {
+    let mut out = String::new();
+    if let Some(stdout) = child.stdout.as_mut() {
+        let _ = stdout.read_to_string(&mut out);
+    }
+    match out.lines().next().map(str::trim) {
+        Some("sat") => Verdict::Sat,
+        Some("unsat") => Verdict::Unsat,
+        _ => Verdict::Unknown,
     }
 }
