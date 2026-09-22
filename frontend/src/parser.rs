@@ -206,7 +206,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
     match expr {
         SynExpr::Lit(syn::ExprLit { lit, .. }) => match lit {
             syn::Lit::Bool(b) => Expr::BoolConst(b.value),
-            _ => Expr::Var(format!("unsupported_literal_{:?}", lit)),
+            other => panic!("unsupported syntax: literal `{}` (only `true`/`false`; numbers have no sort in the fragment)", quote::ToTokens::to_token_stream(other)),
         },
         SynExpr::Path(p) => {
             let ident = p.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>().join("::");
@@ -258,7 +258,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                     args: vec![convert_expr(&b.left), convert_expr(&b.right)],
                 }
             } else {
-                Expr::Var("unsupported_binary_op".to_string())
+                panic!("unsupported syntax: binary operator `{}`", quote::ToTokens::to_token_stream(&b.op))
             }
         }
         SynExpr::Unary(u) => {
@@ -269,7 +269,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
             
             let op = match u.op {
                 syn::UnOp::Not(_) => UnOp::Not,
-                _ => return Expr::Var("unsupported_unary_op".to_string()),
+                _ => panic!("unsupported syntax: unary operator `{}`", quote::ToTokens::to_token_stream(&u.op)),
             };
             Expr::UnOp {
                 op,
@@ -292,10 +292,10 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                                     let base_type = convert_base_type(&pt.ty);
                                     binders.push((ident, base_type));
                                 } else {
-                                    return Expr::Var("invalid_quantifier_arg".to_string());
+                                    panic!("unsupported syntax: quantifier binder must be a plain name, got `{}`", quote::ToTokens::to_token_stream(pt));
                                 }
                             } else {
-                                return Expr::Var("missing_type_annotation".to_string());
+                                panic!("unsupported syntax: quantifier binder `{}` needs a type annotation (`|x: T| ..`)", quote::ToTokens::to_token_stream(arg));
                             }
                         }
                         let body = Box::new(convert_expr(&closure.body));
@@ -333,7 +333,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                     Expr::Call { func, args }
                 }
             } else {
-                Expr::Var("complex_call".to_string())
+                panic!("unsupported syntax: call of a non-path expression `{}`", quote::ToTokens::to_token_stream(&c.func))
             }
         }
         SynExpr::Closure(closure) => {
@@ -346,7 +346,7 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                 return convert_expr(&m.receiver);
             }
             // 지원하지 않는 메서드 호출은 일단 변수로 처리 (검증에 쓰이지 않는 본문용)
-            Expr::Var(format!("unsupported_method_{}", m.method))
+            panic!("unsupported syntax: method call `.{}(..)` (only `.clone()`)", m.method)
         }
         SynExpr::Tuple(t) => {
             let exprs = t.elems.iter().map(convert_expr).collect();
@@ -433,9 +433,9 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                     };
                 }
             }
-            Expr::Var(format!("unsupported_macro_{}", mac_name))
+            panic!("unsupported syntax: macro `{}!` in an expression", mac_name)
         }
-        _ => Expr::Var("unsupported_expression".to_string()),
+        other => panic!("unsupported syntax: expression `{}`", quote::ToTokens::to_token_stream(other)),
     }
 }
 
