@@ -45,19 +45,23 @@ silently vacuous. Why this is so is visible in the query text: see
 
 - Run tests from `test_suite/`: `cargo test --test <file>` (file =
   `tests/<file>.rs`).
-- A failure names its goal `<lemma>_vc_<k>` and writes
-  `test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`. The lemma is a
-  `#[val(... -> Lemma(...))]` function in some `tests/*.rs`; the
+- One run solves EVERY goal and reports EVERY failing one (it does not
+  stop at the first). Each failure names its goal `<lemma>_vc_<k>` and
+  writes `test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`. The lemma
+  is a `#[val(... -> Lemma(...))]` function in some `tests/*.rs`; the
   counterexample's `branch :` line identifies the match arm the VC belongs
-  to — that arm is where hints go.
+  to — that arm is where hints go. Goals are numbered per generated
+  obligation; argument checks against unrefined parameters generate none.
 - Log files are keyed by LEMMA name, not file name: two test files sharing
   a lemma name overwrite each other's logs; the last run owns them.
 - How to read the file: `reference/counterexample-format.md`.
 
 ## 4. Procedure
 
-1. **Run and read.** Run the failing test; open the counterexample file.
-   Identify lemma, VC, branch, definitions block, and the ledger.
+1. **Run and read.** Run the failing test; open the counterexample file
+   of EACH failing VC. Identify lemma, VC, branch, definitions block, and
+   the ledger. Different VCs are different branches: work each one's
+   frontier separately (steps 2–3), then make all edits in one pass.
 
 2. **Coverage pre-check.** Every pattern variable bound in the `branch :`
    line must appear in some hypothesis group of the ledger. A variable in
@@ -85,9 +89,9 @@ silently vacuous. Why this is so is visible in the query text: see
      outermost result is the only thing missing, the branch will already
      be green -- re-check pinning before concluding anything.
 
-4. **Edit and re-run.** Add ALL of the round's candidates as
-   `instantiate!` lines in the failing branch, before the tail/recursive
-   call (syntax: §6), then re-run the test.
+4. **Edit and re-run.** Add ALL of the round's candidates, for EVERY
+   failing branch, as `instantiate!` lines in that branch, before the
+   tail/recursive call (syntax: §6), then re-run the test once.
 
    Do NOT minimize, filter, or second-guess candidates at this stage. Add
    every candidate the round produced, including ones that look redundant,
@@ -114,9 +118,12 @@ silently vacuous. Why this is so is visible in the query text: see
 
 5. **Loop or finish.**
    - Green: NOW minimize — this is the only point in the procedure where
-     hints are removed. Remove each added hint in turn, keep only those
-     whose removal re-breaks the proof, then report the final set.
-   - Still red: re-read the REGENERATED counterexample. Your hints now
+     hints are removed. Since a run reports every failure, remove several
+     hints per run (e.g. all hints of one branch, or half of them) and
+     bisect on what re-breaks; keep only the hints whose removal breaks
+     the proof, then report the final set.
+   - Still red: re-read the REGENERATED counterexamples (some branches
+     may now be green — only the still-failing ones are written). Your hints now
      appear in the ledger (group "user hints"), which pins deeper
      scrutinees and enables the next layer of unfoldings. Repeat from
      step 3. Rounds correspond to unrolling depth: numeral-shaped goals

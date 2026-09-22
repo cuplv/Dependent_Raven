@@ -69,11 +69,13 @@ Defining a helper without calling it changes nothing.
 
 ## 3. Artifacts and commands
 
-Identical to raven-instantiate §3 (run from `test_suite/`, counterexample
-at `logs/<lemma>_vc_<k>_counterexample.smt2`, lemma-keyed logs). One
+Identical to raven-instantiate §3 (run from `test_suite/`, one run
+reports every failing VC, counterexample at
+`logs/<lemma>_vc_<k>_counterexample.smt2`, lemma-keyed logs). One
 addition: a constructed helper's failing VCs are named after the HELPER
-(`max_comm_vc_6`) and get their own counterexamples — the failure moving
-into the helper is normal (it is the composition trigger, §5).
+(`max_comm_vc_6`) and get their own counterexamples — a helper failure
+and the target's remaining failures appear in the SAME run; the helper's
+is the composition trigger (§5).
 
 ## 4. Procedure
 
@@ -105,13 +107,16 @@ into the helper is normal (it is the composition trigger, §5).
    split: wrap the branch in a match on the blocking variable (the
    variable the ledger shows as shapeless). Fragment errors:
    `reference/epr-fitting.md` (one reformulation pass, else Stop L3).
-6. **Compose.** Re-run. If a HELPER VC fails, apply
-   `../raven-instantiate/SKILL.md`'s procedure to it (§5). If a TARGET
-   VC still fails, re-classify from the top (the cascade — fixing one
-   gap can surface the next).
+6. **Compose.** Re-run; the report lists every VC still failing. For
+   each HELPER VC that fails, apply `../raven-instantiate/SKILL.md`'s
+   procedure to it (§5). For each TARGET VC that still fails,
+   re-classify from the top (the cascade — fixing one gap can surface
+   the next). Several failures in one report are independent gaps unless
+   the same missing fact explains them; treat each on its own.
 7. **Verify and minimize (Stop L4).** Target green -> remove each added
    lemma/call in turn (keep what re-breaks), remove target hints made
-   redundant, re-verifying after each removal -> report.
+   redundant — several removals per run are fine, since one run shows
+   everything that broke — re-verifying after each batch -> report.
 
 ## 5. Composition protocol (normative)
 
