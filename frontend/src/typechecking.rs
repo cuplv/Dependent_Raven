@@ -554,6 +554,15 @@ pub fn generate_subtyping_vc(
                 panic!("Base type mismatch in subtyping: {:?} <: {:?}", base_inf, base_exp);
             }
 
+            // [KOR] 기대 조건이 문자 그대로 `true`이면(정제 없는 매개변수에 인자를 넘길 때 등)
+            //       VC `Γ ∧ e_1 ⇒ true`는 문맥과 무관하게 참이므로 goal을 만들지 않습니다.
+            // [ENG] An expected predicate that is literally `true` (e.g. an argument passed
+            //       to an unrefined parameter) makes the VC `Γ ∧ e_1 ⇒ true`, valid whatever
+            //       the context says: no goal is generated.
+            if matches!(pred_exp, Expr::BoolConst(true)) {
+                return;
+            }
+
             // [KOR] 스코프를 열어 임시 변수와 가정들을 안전하게 격리합니다.
             // [ENG] Open a new scope to safely isolate the temporary variable and assumptions.
             env.with_scope(|inner_env| {
