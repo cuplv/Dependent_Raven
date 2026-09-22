@@ -246,10 +246,22 @@ pub fn synthesize_expr(
                 synthesize_expr(env, arg, global_specs, vcs);
             }
             
-            // [KOR] 생성자는 그 자체로 해당 데이터 타입을 반환합니다. (예: Nat::S -> Nat)
-            // [ENG] A constructor itself returns its corresponding data type. (e.g., Nat::S -> Nat)
+            // [KOR] 생성자 항은 자기 자신을 기록하는 singleton 타입 `{v | v == C(args)}`를
+            //       받습니다(T-VAR가 변수에 하듯이). 그래야 이 항을 정제된 매개변수
+            //       (requires)에 넘길 때 의무가 `v_sub == C(args)`를 알 수 있습니다.
+            // [ENG] A constructor term gets the singleton type `{v | v == C(args)}`, as
+            //       T-VAR does for variables, so an obligation on it (a `requires`
+            //       parameter) knows that `v_sub == C(args)`.
             let base_name = name.split("::").next().unwrap().to_string();
-            Type::Base(BaseType::Custom(base_name))
+            Type::Refined(RefinedType {
+                bound_var: "v".to_string(),
+                base: BaseType::Custom(base_name),
+                predicate: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Var("v".to_string())),
+                    right: Box::new(expr.clone()),
+                },
+            })
         }
 
         Expr::Tuple(elems) => {

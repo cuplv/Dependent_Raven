@@ -78,3 +78,39 @@ fn precondition_obligation_is_still_checked() {
     assert!(report.contains("'user_bad_vc_2'"), "precondition failure missing:\n{}", report);
     assert!(!report.contains("'user_bad_vc_1'"), "the Z arm has no obligation to fail:\n{}", report);
 }
+
+// A `requires` lemma called on a constructor LITERAL. T-CONSTRUCT now gives the
+// literal the singleton type `{v | v == Nat::Z}` (as T-VAR does for variables),
+// so the obligation `is_zero(v_sub)` knows that `v_sub == Nat::Z`. Before this,
+// the literal had the bare base type and the obligation was unprovable.
+#[test]
+fn precondition_on_constructor_literal_is_provable() {
+    let mut program = frontend::ast::Program {
+        datatypes: HashMap::new(),
+        functions: HashMap::new(),
+        goals: Vec::new(),
+    };
+    frontend::api::register_enum(&mut program, "Nat", "enum Nat { Z, S(Box<Nat>) }");
+    frontend::api::register_val(
+        &mut program,
+        "is_zero2",
+        None,
+        "fn is_zero2(n: Nat) -> bool { match n { Nat::Z => true, Nat::S(_) => false } }",
+        false,
+    );
+    frontend::api::register_val(
+        &mut program,
+        "needs_zero2",
+        Some("(n: Nat) -> Lemma(requires(is_zero2(n)), ensures(n == Nat::Z))"),
+        "fn needs_zero2(n: Nat) { match n { Nat::Z => (), Nat::S(m) => () } }",
+        false,
+    );
+    frontend::api::register_val(
+        &mut program,
+        "user_literal",
+        Some("(x: Nat) -> Lemma(x == x)"),
+        "fn user_literal(x: Nat) { instantiate!(is_zero2(Nat::Z)); needs_zero2(Nat::Z); }",
+        false,
+    );
+    backend::smt::encode_and_solve(program).expect("is_zero2(Nat::Z) is provable");
+}
