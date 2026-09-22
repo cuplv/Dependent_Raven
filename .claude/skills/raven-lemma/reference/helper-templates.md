@@ -121,8 +121,9 @@ fn helper(n: Nat, xs: NList, ys: NList) {
   far, so a helper placed below its caller fails with "Unbound function or
   lemma: <helper>". House style is directly above the target with a
   `// Helper:` comment stating the statement in words.
-- **Patterns:** `_` inside a constructor pattern is fine; no bare `_ =>`
-  catch-all arms (rejected).
+- **Patterns:** `_` inside a constructor pattern is fine; a bare `_ =>`
+  arm after a constructor arm is expanded to the uncovered constructors
+  (one VC each in a proof body).
 - **Descent & acyclicity:** self-calls only on corresponding-parameter
   strict subterms (at least one strict); no calls to the target, ever;
   calls to already-proven lemmas are free (no depth cost).

@@ -166,8 +166,10 @@ proof); say so explicitly, and never present it as exhaustion.
   `.clone()`, no ownership concerns inside the macro.
 - Use binder names in scope in the failing branch (`j_prime`, `h`, `t`);
   a hint may reference only variables bound by that branch.
-- A `_` inside a constructor pattern (`Nat::S(_)`) is fine; a bare `_ =>`
-  catch-all arm is rejected — write out the remaining constructors.
+- A `_` inside a constructor pattern (`Nat::S(_)`) is fine. A bare `_ =>`
+  arm is allowed after at least one constructor arm: it stands for the
+  constructors the earlier arms leave uncovered, and in a proof body it
+  yields one VC per such constructor (each may need its own hints).
 
 ## 7. Report format
 

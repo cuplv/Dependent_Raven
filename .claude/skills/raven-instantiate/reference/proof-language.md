@@ -95,8 +95,11 @@ The contents are RECORDED, not compiled as Rust:
 1. REAL calls (helpers, IH) ARE compiled Rust: `.clone()` values you reuse,
    deref boxes with `*` (`tip_nine(*i_prime, *j_prime, k)`).
 2. A `_` inside a constructor pattern is fine (`Nat::S(_)`; it becomes a
-   fresh `_wild_N` binder). A bare `_ =>` catch-all arm is rejected — write
-   out the remaining constructors.
+   fresh `_wild_N` binder). A bare `_ =>` arm is allowed after at least one
+   constructor arm: it is expanded to the constructors the earlier arms
+   leave uncovered, so in a proof body it yields one VC per such
+   constructor. A match whose only arm is `_`, or an arm after the `_`
+   arm, is rejected.
 3. A match target must be a simple variable; to match a boxed tail write
    `match *t.clone() { ... }`. In a FUNCTION body the variable may be
    let-bound to a call (`let s = add(x, y); match s { .. }`), which is how a
