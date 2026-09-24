@@ -377,7 +377,29 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
             }
         }
         SynExpr::Match(m) => {
-            let expr = Box::new(convert_expr(&m.expr));
+            // A match target must be a variable (the checker's path condition
+            // and the backend's axiom generation both assume it). A scrutinee
+            // that is anything else -- a call, or a tuple with a call inside --
+            // is let-bound to a fresh `_scrut_N` in front of the match, so
+            // `match (eval(a), eval(b)) { .. }` reads as written.
+            let mut scrutinee_lets: Vec<(Ident, Expr)> = Vec::new();
+            let mut bind_if_needed = |e: Expr| -> Expr {
+                match e {
+                    Expr::Var(_) => e,
+                    other => {
+                        let name = fresh_name("_scrut");
+                        scrutinee_lets.push((name.clone(), other));
+                        Expr::Var(name)
+                    }
+                }
+            };
+            let target = match convert_expr(&m.expr) {
+                Expr::Tuple(components) => {
+                    Expr::Tuple(components.into_iter().map(&mut bind_if_needed).collect())
+                }
+                other => bind_if_needed(other),
+            };
+            let expr = Box::new(target);
             let arms = m.arms.iter().map(|arm| {
                 // A guard would have to become an extra path condition on this arm
                 // AND its negation on every later arm (first-match semantics); arms
@@ -401,8 +423,15 @@ pub fn convert_expr(expr: &SynExpr) -> Expr {
                 let body = convert_expr(&arm.body);
                 (pat, body)
             }).collect();
-            
-            Expr::Match { expr, arms }
+
+            // let _scrut_0 = e0 in let _scrut_1 = e1 in match (_scrut_0, _scrut_1) { .. }
+            scrutinee_lets.into_iter().rev().fold(Expr::Match { expr, arms }, |body, (name, bound)| {
+                Expr::Let {
+                    pat: Pattern::Ident(name),
+                    bound_expr: Box::new(bound),
+                    body: Box::new(body),
+                }
+            })
         }
         SynExpr::Paren(p) => convert_expr(&p.expr),
         SynExpr::Block(b) => convert_block(&b.block),
@@ -543,16 +572,20 @@ thread_local! {
 /// and the backend needs one for the axiom's quantifier. Names are unique per
 /// process so nested matches in one body never produce duplicate binders.
 /// Only match-arm patterns go through here; `let _ = e;` keeps its wildcard.
+/// A name no source program uses, unique per process: `_wild_N` for the
+/// fields of a wildcard pattern, `_scrut_N` for a let-bound match scrutinee.
+pub(crate) fn fresh_name(prefix: &str) -> Ident {
+    let n = WILDCARD_COUNTER.with(|c| {
+        let n = c.get();
+        c.set(n + 1);
+        n
+    });
+    format!("{}_{}", prefix, n)
+}
+
 pub(crate) fn name_nested_wildcards(pat: Pattern) -> Pattern {
     match pat {
-        Pattern::Wildcard => {
-            let n = WILDCARD_COUNTER.with(|c| {
-                let n = c.get();
-                c.set(n + 1);
-                n
-            });
-            Pattern::Ident(format!("_wild_{}", n))
-        }
+        Pattern::Wildcard => Pattern::Ident(fresh_name("_wild")),
         Pattern::Constructor { name, args, arg_types } => Pattern::Constructor {
             name,
             args: args.into_iter().map(name_nested_wildcards).collect(),
@@ -596,6 +629,19 @@ pub fn convert_pattern(pat: &syn::Pat) -> Pattern {
             let ident = pp.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>().join("::");
             Pattern::Constructor { name: ident, args: vec![], arg_types: None }
         }
+        // A `bool` literal in a pattern is written as the pseudo-constructor
+        // `bool::true` / `bool::false`. It never reaches the checker or the
+        // backend: resolve.rs compiles any match containing one into an `if`
+        // on the matched value (see `compile_rows`).
+        syn::Pat::Lit(syn::PatLit { lit: syn::Lit::Bool(b), .. }) => Pattern::Constructor {
+            name: format!("bool::{}", b.value),
+            args: vec![],
+            arg_types: None,
+        },
+        syn::Pat::Lit(other) => panic!(
+            "unsupported syntax: literal pattern `{}` (only `true`/`false`)",
+            quote::ToTokens::to_token_stream(other)
+        ),
         _ => unimplemented!("Unsupported pattern: {:?}", pat),
     }
 }

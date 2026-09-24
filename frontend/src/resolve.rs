@@ -52,11 +52,15 @@ pub fn resolve_pattern_types(
     expr: &mut Expr,
     datatypes: &HashMap<Ident, Vec<(Ident, Vec<BaseType>)>>,
 ) {
-    // A match on a tuple is first compiled into matches on single variables; the
-    // result is then resolved like any other expression.
+    // A match on a tuple, or one with a `bool` literal in a pattern, is first
+    // compiled into matches on single variables (and `if`s on bool fields);
+    // the result is then resolved like any other expression.
     let compiled = match expr {
         Expr::Match { expr: target, arms } => match &**target {
             Expr::Tuple(components) => Some(compile_tuple_match(components, arms, datatypes)),
+            Expr::Var(_) if arms.iter().any(|(p, _)| has_bool_literal(p)) => {
+                Some(compile_tuple_match(std::slice::from_ref(target), arms, datatypes))
+            }
             _ => None,
         },
         _ => None,
@@ -144,6 +148,8 @@ fn compile_tuple_match(
         .map(|(pat, body)| match pat {
             Pattern::Tuple(ps) if ps.len() == scrutinees.len() => (ps.clone(), body.clone()),
             Pattern::Wildcard => (vec![Pattern::Wildcard; scrutinees.len()], body.clone()),
+            // a single-variable match routed here for its literal patterns
+            other if scrutinees.len() == 1 => (vec![other.clone()], body.clone()),
             other => panic!(
                 "a match on a {}-tuple needs {}-tuple patterns or `_`, got `{}`",
                 scrutinees.len(), scrutinees.len(), render_pattern(other)
@@ -181,6 +187,34 @@ fn compile_rows(
             .collect();
         return compile_rows(rest, rows, datatypes);
     };
+
+    // A `bool` column (the parser writes a literal as `bool::true`/`bool::false`)
+    // is not a datatype: it is decided by an `if` on the variable, with the rows
+    // that can still match under each outcome.
+    if enum_name == "bool" {
+        let branch = |value: bool| -> Expr {
+            let name = format!("bool::{}", value);
+            let sub_rows: Vec<(Vec<Pattern>, Expr)> = rows
+                .iter()
+                .filter_map(|(pats, body)| match &pats[0] {
+                    Pattern::Constructor { name: n, .. } if *n == name => {
+                        Some((pats[1..].to_vec(), body.clone()))
+                    }
+                    Pattern::Constructor { .. } => None,
+                    irrefutable => Some((pats[1..].to_vec(), bind(irrefutable, scrutinee, body.clone()))),
+                })
+                .collect();
+            if sub_rows.is_empty() {
+                panic!("match is not exhaustive: no row covers `{}`", name);
+            }
+            compile_rows(rest, sub_rows, datatypes)
+        };
+        return Expr::If {
+            cond: Box::new(Expr::Var(scrutinee.clone())),
+            then_expr: Box::new(branch(true)),
+            else_expr: Box::new(branch(false)),
+        };
+    }
 
     let variants = datatypes.get(&enum_name).unwrap_or_else(|| panic!(
         "Pattern resolution: unknown datatype '{}' in a tuple match", enum_name
@@ -224,6 +258,17 @@ fn compile_rows(
         })
         .collect();
     Expr::Match { expr: Box::new(Expr::Var(scrutinee.clone())), arms }
+}
+
+/// [ENG] Does the pattern contain a `bool` literal (`bool::true`/`bool::false`)?
+fn has_bool_literal(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Constructor { name, args, .. } => {
+            name.starts_with("bool::") || args.iter().any(has_bool_literal)
+        }
+        Pattern::Tuple(ps) => ps.iter().any(has_bool_literal),
+        Pattern::Wildcard | Pattern::Ident(_) => false,
+    }
 }
 
 /// [ENG] A row's binder for a column becomes `let x = scrutinee` around its body;
