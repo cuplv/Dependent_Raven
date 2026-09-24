@@ -17,7 +17,8 @@ description: Diagnose a failed ravencheck proof and find missing instantiate!
 
 The ONLY permitted edit is adding `instantiate!(...)` lines inside the
 failing branch of the failing lemma (and removing lines YOU added, during
-minimization). Everything else is read-only: `Lemma(...)` specifications,
+minimization — which happens ONLY when the user asked for it, §5).
+Everything else is read-only: `Lemma(...)` specifications,
 function definitions, match skeletons, recursive and helper calls, other
 tests. Never weaken a spec, never comment out a property, never mark a
 test ignored. If no permitted edit can succeed, the correct output is a
@@ -106,9 +107,9 @@ silently vacuous. Why this is so is visible in the query text: see
    every candidate the round produced, including ones that look redundant,
    unlikely, or already implied by another hint. Adding is always sound
    (§1); a candidate left out costs an extra round and can hide progress,
-   while a surplus hint costs nothing until minimization. Minimization
-   happens exactly once, after the proof is green (step 5) — never while
-   the proof is still red.
+   while a surplus hint costs nothing. Hints are never removed while the
+   proof is red, and after it is green only if the user asked for
+   minimization (step 5).
 
    *Optional self-audit* — do this when the user requested an audited run,
    or whenever you are unsure an edit stayed inside §1's envelope:
@@ -126,11 +127,17 @@ silently vacuous. Why this is so is visible in the query text: see
    silently empty.)
 
 5. **Loop or finish.**
-   - Green: NOW minimize — this is the only point in the procedure where
-     hints are removed. Since a run reports every failure, remove several
-     hints per run (e.g. all hints of one branch, or half of them) and
-     bisect on what re-breaks; keep only the hints whose removal breaks
-     the proof, then report the final set.
+   - Green: STOP and report (§7). Do not minimize unless the user asked
+     for it — by the invocation keyword `minimize` (e.g.
+     "/raven-instantiate — minimize") or in so many words. Minimization
+     costs one verifier run per removal batch and is not part of finding
+     the proof; a proof with surplus hints is a finished proof. When it
+     IS requested: this is the only point where hints are removed; since
+     a run reports every failure, remove several hints per run (e.g. all
+     hints of one branch, or half of them), bisect on what re-breaks,
+     keep only the hints whose removal breaks the proof, and report the
+     final set. Never leave a minimization script running after the
+     report.
    - Still red: re-read the REGENERATED counterexamples (some branches
      may now be green — only the still-failing ones are written). Your hints now
      appear in the ledger (group "user hints"), which pins deeper
@@ -182,8 +189,9 @@ proof); say so explicitly, and never present it as exhaustion.
 
 ## 7. Report format
 
-On success: the hints added (grouped by round), the minimization result,
-and the verified state. When no further permitted edit is possible: the
+On success: the hints added (grouped by round), the verified state, and —
+only if minimization was requested — the minimization result. When no
+further permitted edit is possible: the
 final-state description of §5 — ledger, last frontier table, observations
 about the goal sides — with no diagnosis verdict (designed report
 templates live, inactive, in `reference/stop-conditions-draft.md`).

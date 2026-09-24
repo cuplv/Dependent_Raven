@@ -23,7 +23,8 @@ Permitted edits — ADDITIVE, PROOF-SIDE ONLY:
 - restructuring a proof-body branch into a `match` (a case split);
 - removing things this skill added, and removing `instantiate!` lines in
   the target that this skill's fix made redundant (minimization only,
-  re-verifying green after each removal).
+  which happens ONLY when the user asked for it — §4 step 7 — re-verifying
+  green after each removal).
 
 Read-only, forever: the TARGET's `Lemma(...)` specification, every
 `#[val]` function definition, datatype declarations, other tests.
@@ -113,10 +114,16 @@ is the composition trigger (§5).
    re-classify from the top (the cascade — fixing one gap can surface
    the next). Several failures in one report are independent gaps unless
    the same missing fact explains them; treat each on its own.
-7. **Verify and minimize (Stop L4).** Target green -> remove each added
-   lemma/call in turn (keep what re-breaks), remove target hints made
-   redundant — several removals per run are fine, since one run shows
-   everything that broke — re-verifying after each batch -> report.
+7. **Verify (Stop L4).** Target green -> re-run once to confirm -> report
+   (§7). Do not minimize unless the user asked for it — by the invocation
+   keyword `minimize` (e.g. "/raven-lemma — minimize") or in so many
+   words. A proof with surplus lemmas or hints is a finished proof;
+   minimization costs one verifier run per removal batch and is a
+   separate request. When it IS requested: remove each added lemma/call
+   in turn (keep what re-breaks), remove target hints made redundant —
+   several removals per run are fine, since one run shows everything
+   that broke — re-verifying after each batch, and never leave a
+   minimization script running after the report.
 
 ## 5. Composition protocol (normative)
 
@@ -157,7 +164,7 @@ is the composition trigger (§5).
 - **L3 — fragment rejection.** The tool's sort-cycle/fragment error
   survives one reformulation pass -> report the attempt list.
   (Criterion and template: `reference/epr-fitting.md`.)
-- **L4 — success.** Verify, minimize, report (§7).
+- **L4 — success.** Verify, report (§7); minimize only on request.
 - **L5 — envelope breach required.** Every conceivable continuation
   lives in a read-only region -> refuse and report what the evidence
   suggests WITHOUT touching it. Three faces: a possibly-wrong spec (every
@@ -173,7 +180,7 @@ is the composition trigger (§5).
 Fix report: per added lemma — statement, signature, template, call
 site(s) and instance arguments, composition hints (if any), depth used;
 per added self-call — the mandatory descent line; removals from
-minimization; final verified state.
+minimization (only if it was requested); final verified state.
 
 Diagnosis report (L0/L1/L3/L5): the named stop, the evidence (ledger
 lines / endpoints / attempt list), tried candidates with verdicts, and
