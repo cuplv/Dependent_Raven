@@ -459,13 +459,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             // [ENG] The countermodel: the finite model of the very z3 run that
             //       answered `sat`, written and printed in CamlStar's JSON form.
             if let Some(model) = &model {
-                let variables = program
-                    .goals
-                    .iter()
-                    .find(|g| g.name == goal_name)
-                    .map(crate::cex::goal_variables)
-                    .unwrap_or_default();
-                let json = crate::model::print::camlstar_json(model, &program, &variables);
+                let json = crate::model::print::camlstar_json(model, &program, &goal.skolem_vars);
                 let model_path = format!("logs/{}_model.json", goal_name);
                 match fs::write(&model_path, format!("{}\n", json)) {
                     Ok(()) => cex_line.push_str(&format!("\n## > 💾 Model: {}", model_path)),
