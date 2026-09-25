@@ -3,7 +3,7 @@
 #[ravencheck::module]
 mod compiler_spec {
 
-    // ---- 1. Peano naturals (instruction counts and list lengths) ----
+    // ---- 1. Nat type ----
     #[define]
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum Nat {
