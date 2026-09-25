@@ -56,6 +56,14 @@ use frontend::ast::{BinOp, Expr, Goal, Program};
 
 use dissect::{Core, VcParts};
 
+/// [KOR] goal의 변수들(Forall 바인더와 소트). 모델 출력기가 쓰며, 반례
+///       파일이 선언하는 목록과 같습니다.
+/// [ENG] The goal's variables (its Forall binders, with sorts), for the model
+///       printer: the same list the counterexample file declares.
+pub fn goal_variables(goal: &Goal) -> Vec<(frontend::ast::Ident, frontend::ast::BaseType)> {
+    dissect::dissect(&goal.property).skolems
+}
+
 /// [KOR] 실패한 goal에 대한 반례 파일을 `path`에 씁니다.
 ///       호출자는 에러(와 panic)를 경고로만 다루어야 합니다: 반례 생성
 ///       실패가 검증 실패 보고 자체를 가려서는 안 됩니다.

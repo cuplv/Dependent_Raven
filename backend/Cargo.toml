@@ -10,3 +10,6 @@ graph-cycles = "0.3.0"
 petgraph = "0.8"
 easy-smt = "0.2.2"
 quote = "1.0"
+# Countermodel extraction (backend/src/model): links the system libz3
+# (Homebrew z3 5.1.0); the Z3_SYS_Z3_HEADER env var points the build at it.
+z3 = "0.21"
