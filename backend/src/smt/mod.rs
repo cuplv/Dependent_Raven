@@ -415,7 +415,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
         ctx.assert(goal_smt);
 
-        let verdict = ctx.solve(&smt_log_path);
+        let (verdict, model) = ctx.solve(&smt_log_path);
         if verdict != Verdict::Unsat {
             // [KOR] 반례 파일을 소스 어휘로 방출합니다. 파일은 goal과 그 인스턴스화
             //       목록(ledger)에서 만들어지며 solver 모델을 읽지 않으므로, 답이
@@ -449,11 +449,30 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 }
             }
             // Only advertise the counterexample file if it was actually written.
-            let cex_line = if cex_written {
+            let mut cex_line = if cex_written {
                 format!("\n## > 💾 Counterexample: {}", cex_path)
             } else {
                 String::new()
             };
+            // [KOR] 반례 모델: `sat`을 낸 바로 그 z3 실행의 유한 모델을 CamlStar의 JSON
+            //       형식으로 파일에 쓰고 출력합니다.
+            // [ENG] The countermodel: the finite model of the very z3 run that
+            //       answered `sat`, written and printed in CamlStar's JSON form.
+            if let Some(model) = &model {
+                let variables = program
+                    .goals
+                    .iter()
+                    .find(|g| g.name == goal_name)
+                    .map(crate::cex::goal_variables)
+                    .unwrap_or_default();
+                let json = crate::model::print::camlstar_json(model, &program, &variables);
+                let model_path = format!("logs/{}_model.json", goal_name);
+                match fs::write(&model_path, format!("{}\n", json)) {
+                    Ok(()) => cex_line.push_str(&format!("\n## > 💾 Model: {}", model_path)),
+                    Err(e) => println!("  ⚠️ Failed to write model {}: {}", model_path, e),
+                }
+                println!("{}", json);
+            }
             failures.push(if verdict == Verdict::Sat {
                 format!(
                     "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}{}",
@@ -461,7 +480,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 )
             } else {
                 format!(
-                    "Verification of '{}' cannot proceed: solver returned UNKNOWN (no answer within the time limit).\n## > 💾 Check the SMT query at: {}{}",
+                    "Verification of '{}' cannot proceed: solver returned UNKNOWN.\n## > 💾 Check the SMT query at: {}{}",
                     goal_name, smt_log_path, cex_line
                 )
             });

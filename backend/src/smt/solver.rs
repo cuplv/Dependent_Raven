@@ -1,34 +1,31 @@
 //! backend/src/smt/solver.rs
 //! SMT 질의 파일 작성과 솔버 프로세스 실행을 담당하는 모듈
 //!
-//! [ENG] A goal's query is written to a file as SMT-LIB text and the solver runs on
-//! that file as a subprocess. Owning the process (instead of talking to one over an
-//! interactive pipe) is what allows a race between two solver configurations:
+//! [ENG] A goal's query is written to a file as SMT-LIB text (the replay artifact)
+//! and solved in-process by z3 through its API, with no time limit, one run per
+//! goal. When the answer is `sat`, the finite model of that same run is returned
+//! with the verdict, so the countermodel costs no second solve. z3's own
+//! `unknown`, and any error it raises (out of memory), are reported as
+//! `Unknown`.
 //!
-//!   - `cvc5 --full-saturate-quant`  proves (unsat), but does not terminate on a
-//!     satisfiable query of AVL size;
-//!   - `cvc5 --finite-model-find`    finds the countermodel (sat) quickly, but does
-//!     not terminate on the hard unsat queries.
-//!
-//! Every query is in EPR, so exactly one of the two is in its element; the first
-//! definitive answer decides and the other process is killed.
-//!
-//! `RAVENCHECK_SOLVER=z3` selects z3 (one process). `RAVENCHECK_TIMEOUT` is the
-//! per-goal limit in seconds (default 30; `0` = none). A goal with no definitive
-//! answer in time is `Unknown`; a countermodel of AVL size can take hours to
-//! find, and the counterexample file does not need one.
-//! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고, 솔버를 그 파일에 대한 하위
-//! 프로세스로 실행합니다. 프로세스를 직접 소유하므로 두 솔버 설정의 경주가
-//! 가능합니다: 먼저 확정 답을 낸 쪽이 결정하고 나머지는 종료됩니다.
+//! `RAVENCHECK_SOLVER=cvc5` keeps the earlier subprocess race (cvc5
+//! `--full-saturate-quant` against `--finite-model-find`, first definite answer
+//! wins), which yields no model.
+//! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고(재생용), z3 API로 프로세스 안에서
+//! 시간 제한 없이 한 번 풉니다. 답이 `sat`이면 그 실행의 유한 모델을 함께 돌려주므로
+//! 반례 모델에 두 번째 풀이가 들지 않습니다. z3의 `unknown`과 오류(메모리 부족)는
+//! `Unknown`으로 보고합니다.
 
+use crate::model::Model;
 use easy_smt::{Context, ContextBuilder, SExpr};
 use std::fs;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// [KOR] 솔버의 답. `Unknown`은 시간 제한 안에 어느 프로세스도 확정 답을 내지 못했다는 뜻입니다.
-/// [ENG] The solver's answer. `Unknown`: no process gave a definitive answer in time.
+/// [KOR] 솔버의 답. `Unknown`은 확정 답이 없었다는 뜻입니다(z3의 unknown 또는 오류).
+/// [ENG] The solver's answer. `Unknown`: no definitive answer (z3's own unknown,
+///       or an error such as out of memory).
 #[derive(Debug, PartialEq)]
 pub enum Verdict {
     Sat,
@@ -82,44 +79,30 @@ impl Query {
     }
 
     /// [ENG] Writes the query, closed by `(check-sat)`, to `path` and solves it.
-    pub fn solve(&self, path: &str) -> Verdict {
-        fs::write(path, format!("{}(check-sat)\n", self.text))
-            .unwrap_or_else(|e| panic!("Failed to write SMT query {}: {}", path, e));
-        solve_file(path)
+    /// [ENG] Writes the query, closed by `(check-sat)`, to `path` and solves it.
+    ///       The model is `Some` only for a `sat` answer from z3.
+    pub fn solve(&self, path: &str) -> (Verdict, Option<Model>) {
+        let text = format!("{}(check-sat)\n", self.text);
+        fs::write(path, &text).unwrap_or_else(|e| panic!("Failed to write SMT query {}: {}", path, e));
+        match std::env::var("RAVENCHECK_SOLVER").as_deref() {
+            Ok("cvc5") => (solve_with_cvc5(path), None),
+            Ok(other) if other != "z3" => panic!("RAVENCHECK_SOLVER must be `z3` or `cvc5`, got `{}`", other),
+            _ => crate::model::z3::solve(&text),
+        }
     }
 }
 
-fn solve_file(path: &str) -> Verdict {
-    let solver = std::env::var("RAVENCHECK_SOLVER").unwrap_or_else(|_| "cvc5".to_string());
-    let limit: u64 = std::env::var("RAVENCHECK_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
+/// [ENG] The subprocess race kept for `RAVENCHECK_SOLVER=cvc5`: the prover and
+///       the model finder run on the query file without a time limit; the first
+///       definite answer decides and the other process is killed.
+fn solve_with_cvc5(path: &str) -> Verdict {
+    let mut running: Vec<Child> = ["--full-saturate-quant", "--finite-model-find"]
+        .iter()
+        .map(|strategy| spawn("cvc5", &["--lang", "smt2", strategy, path]))
+        .collect();
 
-    // The solvers enforce the limit themselves; the deadline below only covers
-    // one that fails to.
-    let mut running: Vec<Child> = match (solver.as_str(), limit) {
-        ("cvc5", 0) => ["--full-saturate-quant", "--finite-model-find"]
-            .iter()
-            .map(|strategy| spawn("cvc5", &["--lang", "smt2", strategy, path]))
-            .collect(),
-        ("cvc5", _) => ["--full-saturate-quant", "--finite-model-find"]
-            .iter()
-            .map(|strategy| {
-                spawn("cvc5", &["--lang", "smt2", strategy, &format!("--tlimit={}", limit * 1000), path])
-            })
-            .collect(),
-        ("z3", 0) => vec![spawn("z3", &["-smt2", path])],
-        ("z3", _) => vec![spawn("z3", &["-smt2", &format!("-T:{}", limit), path])],
-        (other, _) => panic!("RAVENCHECK_SOLVER must be `cvc5` or `z3`, got `{}`", other),
-    };
-
-    let deadline = (limit > 0).then(|| Instant::now() + Duration::from_secs(limit + 5));
     let mut verdict = Verdict::Unknown;
-    while !running.is_empty()
-        && verdict == Verdict::Unknown
-        && deadline.map_or(true, |d| Instant::now() < d)
-    {
+    while !running.is_empty() && verdict == Verdict::Unknown {
         let mut still_running = Vec::new();
         for mut child in running {
             match child.try_wait().expect("Failed to poll the solver process") {
@@ -147,7 +130,7 @@ fn spawn(program: &str, args: &[&str]) -> Child {
         .stderr(Stdio::null())
         .spawn()
         .unwrap_or_else(|e| panic!(
-            "Failed to start `{}` ({}); install it, or choose the solver with RAVENCHECK_SOLVER=cvc5|z3",
+            "Failed to start `{}` ({}); install it, or unset RAVENCHECK_SOLVER to use z3 in-process",
             program, e
         ))
 }
