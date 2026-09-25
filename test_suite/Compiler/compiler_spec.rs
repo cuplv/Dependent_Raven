@@ -1,27 +1,4 @@
 // Trial file: the CSCI 3155 Project 1 stack-machine compiler
-// (~/Downloads/project1_students/doc/NotebookForProject1.ipynb), transcribed
-// into the language supported on 2026-09-23, plus the correctness theorem
-// with its induction skeleton and nothing else -- no proofs, no hints.
-//
-// Deviations from the notebook, and why:
-//  - `Double` is Peano `Nat`, and `+ - * / >= >` are recursive definitions
-//    (section 2), as in the F* and Lean transcriptions of the benchmark.
-//    The correctness proof needs no arithmetic fact -- both sides apply the
-//    same operation to the same values -- so an uninterpreted `Num` with
-//    `#[declare]` operations would also do (it was the first version).
-//    Numeric literals are `S(S(Z))` etc.; the notebook's Example 1/2 need a
-//    literal helper to be readable (open item C7).
-//  - Exceptions become an explicit failure result: `Res::Fail` for the
-//    machine, `EvRes::Err` for the source semantics.
-//  - The notebook names two instructions `IPop` (operand stack and
-//    environment stack); only the environment-stack one is used by the
-//    compiler (let-rule), so that is the one defined here.
-//  - Skip counts are Peano `Nat`; `length(L1) + 1` is `S(length(L1))`.
-//  - `emulateSingleInstruction`'s pair result `(opstack, envstack)` is the
-//    single-constructor `Res::Done(ops, env)`.
-//  - Source-level `And`/`Or` are given short-circuit semantics in `eval`,
-//    matching the compiled code (`if e1 then e2 else false` etc.); as in the
-//    compiled code, `And(true, e2)` yields e2's value whatever its type.
 // Copy into tests/ to work on it; this file itself is never edited during a trial.
 #[ravencheck::module]
 mod compiler_spec {
@@ -134,9 +111,7 @@ mod compiler_spec {
         }
     }
 
-    // ---- 3. Identifiers: an abstract sort compared with `==` ----
-    // The Rust type is only for compiling the module; the verifier sees an
-    // uninterpreted sort with equality, which is all `lookup` uses.
+    // ---- 3. Identifiers ----
     #[declare]
     type Ident = String;
 
