@@ -29,10 +29,6 @@ mod list_benchmarks {
         match x {
             List::Nil => (),
             List::Cons(h, t) => {
-                // Defines the intermediate terms of the definitional unfolding
-                // (same role as instantiate!(Nat::S(add(..))) in the Nat proofs).
-                instantiate!(List::Cons(h, app(*t, y)));
-                instantiate!(List::Cons(h, app(*t, app(y, z))));
                 app_assoc(*t, y, z);
             }
         }

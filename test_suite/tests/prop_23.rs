@@ -31,8 +31,6 @@ mod tip_benchmarks {
             Nat::S(a_min) => match b {
                 Nat::Z => (),
                 Nat::S(b_min) => {
-                    instantiate!(Nat::S(max(a_min, b_min)));
-                    instantiate!(Nat::S(max(b_min, a_min)));
                     tip_23(*a_min, *b_min);
                 }
             },

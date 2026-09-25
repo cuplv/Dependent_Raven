@@ -37,14 +37,12 @@ mod tip_benchmarks {
     fn tip_seven(n: Nat, m: Nat) {
         match n {
             Nat::Z => {
-                instantiate!(sub(m, n));
                 match m {
                     Nat::Z => (),
                     Nat::S(m_prime) => (),
                 }
             }
             Nat::S(n_prime) => {
-                instantiate!(Nat::S(add(n_prime, m)));
                 tip_seven(*n_prime, m);
             }
         }

@@ -77,10 +77,6 @@ mod tip_benchmarks {
             NList::Nil => (),
             NList::Cons(h, t) => {
                 instantiate!(eq_nat(n, h));
-                instantiate!(NList::Cons(h, app(t, ys)));
-                instantiate!(Nat::S(count(n, app(t, ys))));
-                instantiate!(Nat::S(count(n, t)));
-                instantiate!(Nat::S(add(count(n, t), count(n, ys))));
                 tip_02(n, *t, ys)
             }
         }

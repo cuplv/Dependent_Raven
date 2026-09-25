@@ -52,7 +52,6 @@ mod tip_benchmarks {
         match x {
             Nat::Z => (),
             Nat::S(x_min) => {
-                instantiate!(Nat::S(add(x_min, Nat::Z)));
                 add_zero(*x_min)
             }
         }
@@ -64,7 +63,6 @@ mod tip_benchmarks {
         match x {
             Nat::Z => (),
             Nat::S(x_min) => {
-                instantiate!(Nat::S(add(x_min, Nat::S(y))));
                 add_succ_r(*x_min, y)
             }
         }

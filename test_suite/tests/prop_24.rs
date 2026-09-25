@@ -70,7 +70,6 @@ mod tip_benchmarks {
             Nat::S(a_min) => match b {
                 Nat::Z => eq_refl(a),
                 Nat::S(b_min) => {
-                    instantiate!(Nat::S(max(a_min, b_min)));
                     tip_24(*a_min, *b_min);
                 }
             },

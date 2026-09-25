@@ -93,21 +93,15 @@ mod tip_benchmarks {
     #[val((x: Nat, xs: NList) -> Lemma(implies(sorted(xs), sorted(insort(x, xs)))))]
     fn sorted_insort(x: Nat, xs: NList) {
         match xs {
-            NList::Nil => {
-                instantiate!(sorted(NList::Cons(x, NList::Nil)));
-            }
+            NList::Nil => (),
             NList::Cons(h, t) => {
                 le_neg(x.clone(), h.clone());
-                instantiate!(NList::Cons(x, NList::Cons(h, t)));
                 instantiate!(NList::Cons(h, insort(x, t)));
                 match *t.clone() {
-                    NList::Nil => {
-                        instantiate!(sorted(NList::Cons(x, NList::Nil)));
-                    }
+                    NList::Nil => (),
                     NList::Cons(h2, t2) => {
                         instantiate!(le(h, h2));
                         instantiate!(le(x, h2));
-                        instantiate!(sorted(NList::Cons(x, NList::Cons(h2, t2))));
                         instantiate!(sorted(NList::Cons(h2, insort(x, t2))));
                         sorted_insort(x.clone(), *t.clone());
                     }

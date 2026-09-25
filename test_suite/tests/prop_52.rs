@@ -87,7 +87,6 @@ mod tip_benchmarks {
         match x {
             Nat::Z => (),
             Nat::S(x_min) => {
-                instantiate!(Nat::S(add(x_min, Nat::Z)));
                 add_zero(*x_min);
             }
         }
@@ -99,8 +98,6 @@ mod tip_benchmarks {
         match x {
             Nat::Z => (),
             Nat::S(x_min) => {
-                instantiate!(Nat::S(add(x_min, Nat::S(Nat::Z))));
-                instantiate!(Nat::S(x_min));
                 add_one(*x_min);
             }
         }
@@ -117,10 +114,6 @@ mod tip_benchmarks {
                 // and the S-wrapped values both sides of the goal pass through
                 // when the eq_nat(n, h) guard holds.
                 instantiate!(eq_nat(n, h));
-                instantiate!(NList::Cons(h, app(t, ys)));
-                instantiate!(Nat::S(count(n, app(t, ys))));
-                instantiate!(Nat::S(count(n, t)));
-                instantiate!(Nat::S(add(count(n, t), count(n, ys))));
                 count_app(n, *t, ys);
             }
         }
@@ -134,9 +127,6 @@ mod tip_benchmarks {
                 // rev(Cons(h, t)) = app(rev(t), [h]); count(n, [h]) evaluates
                 // through count's guard to S(Z) or Z.
                 instantiate!(eq_nat(n, h));
-                instantiate!(NList::Cons(h, NList::Nil));
-                instantiate!(count(n, NList::Nil));
-                instantiate!(Nat::S(count(n, NList::Nil)));
                 count_app(
                     n.clone(),
                     rev(*t.clone()),

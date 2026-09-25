@@ -66,8 +66,6 @@ mod tip_benchmarks {
             Nat::S(a_min) => match b {
                 Nat::Z => (),
                 Nat::S(b_min) => {
-                    instantiate!(Nat::S(max(a_min, b_min)));
-                    instantiate!(Nat::S(max(b_min, a_min)));
                     max_comm(*a_min, *b_min);
                 }
             },
@@ -83,8 +81,7 @@ mod tip_benchmarks {
                 // The mirrored node and the wrapped max are the intermediate
                 // values of unfolding the definitions; naming them here makes
                 // them available to the solver.
-                instantiate!(Tree::Node(Box::new(mirror(r)), e, Box::new(mirror(l))));
-                instantiate!(Nat::S(max(height(l), height(r))));
+
                 tip_47(*l.clone()); // induction hypothesis, left subtree
                 tip_47(*r.clone()); // induction hypothesis, right subtree
                 max_comm(height(*l), height(*r))

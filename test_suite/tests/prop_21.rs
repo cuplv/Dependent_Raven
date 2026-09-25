@@ -36,7 +36,6 @@ mod tip_benchmarks {
         match n {
             Nat::Z => (),
             Nat::S(n_min) => {
-                instantiate!(Nat::S(add(n_min, m)));
                 tip_21(*n_min, m);
             }
         }

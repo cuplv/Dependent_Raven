@@ -2,7 +2,7 @@
 //
 // Mirror image of prop_24 (which relates max(a, b) == a to le(b, a)).
 // The a = Z branch reduces to eq_nat(b, b) == true, discharged by eq_refl;
-// the S-S branch needs the wrapped max hint and the induction hypothesis.
+// the S-S branch needs only the induction hypothesis.
 #[ravencheck::module]
 mod tip_benchmarks {
 
@@ -68,7 +68,6 @@ mod tip_benchmarks {
             Nat::S(a_min) => match b {
                 Nat::Z => (),
                 Nat::S(b_min) => {
-                    instantiate!(Nat::S(max(a_min, b_min)));
                     tip_25(*a_min, *b_min)
                 }
             },

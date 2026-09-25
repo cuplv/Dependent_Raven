@@ -1,8 +1,8 @@
 // TIP IsaPlanner prop_18: lt(i, S(add(i, m)))
 //
 // A bare-predicate goal (no equality): i is strictly below S(i + m).
-// The S case unfolds add(i, m) to S(add(i_min, m)) -- the same wrapped-add
-// hint as prop_09 -- and the induction hypothesis closes lt one level down.
+// The S case unfolds add(i, m) to S(add(i_min, m)) -- the definition supplies
+// that term itself -- and the induction hypothesis closes lt one level down.
 #[ravencheck::module]
 mod tip_benchmarks {
 
@@ -39,7 +39,6 @@ mod tip_benchmarks {
         match i {
             Nat::Z => (),
             Nat::S(i_min) => {
-                instantiate!(Nat::S(add(i_min, m)));
                 tip_18(*i_min, m)
             }
         }

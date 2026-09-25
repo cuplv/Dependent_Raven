@@ -3,7 +3,7 @@
 // min's Z cases return Z outright, so unlike prop_25 no reflexivity helper
 // is needed: the a = Z branch is eq_nat(Z, Z) == true definitionally, and
 // the mixed branch is eq_nat(Z, S(..)) == false. Only the S-S branch needs
-// the wrapped min hint and the induction hypothesis.
+// the induction hypothesis.
 #[ravencheck::module]
 mod tip_benchmarks {
 
@@ -61,7 +61,6 @@ mod tip_benchmarks {
             Nat::S(a_min) => match b {
                 Nat::Z => (),
                 Nat::S(b_min) => {
-                    instantiate!(Nat::S(min(a_min, b_min)));
                     tip_33(*a_min, *b_min)
                 }
             },

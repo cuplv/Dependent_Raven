@@ -80,30 +80,24 @@ mod tip_benchmarks {
         }
     }
 
-    // The guard case split on le(x, h) is left to the solver: the hints for
-    // BOTH insort outcomes are supplied unconditionally, and le_neg's gated
-    // postcondition (le(h, x)) engages exactly when the guard is false.
+    // The guard case split on le(x, h) is left to the solver: le_neg's gated
+    // postcondition (le(h, x)) engages exactly when the guard is false. The
+    // guard-true outcome Cons(x, Cons(h, t)) is pinned by insort's equation;
+    // the guard-false outcome Cons(h, insort(x, t)) contains the inner term
+    // insort(x, t) and has to be named. Below the head, sorted's equations
+    // need the guards le(h, h2), le(x, h2) and the list insort builds there.
     #[val((x: Nat, xs: NList) -> Lemma(implies(sorted(xs), sorted(insort(x, xs)))))]
     fn tip_77(x: Nat, xs: NList) {
         match xs {
-            NList::Nil => {
-                // insort(x, Nil) builds Cons(x, Nil); name it and its sortedness.
-                instantiate!(sorted(NList::Cons(x, NList::Nil)));
-            }
+            NList::Nil => (),
             NList::Cons(h, t) => {
                 le_neg(x.clone(), h.clone());
-                // Guard-true outcome: insort puts x in front.
-                instantiate!(NList::Cons(x, NList::Cons(h, t)));
-                // Guard-false outcome: insort walks past h.
                 instantiate!(NList::Cons(h, insort(x, t)));
                 match *t.clone() {
-                    NList::Nil => {
-                        instantiate!(sorted(NList::Cons(x, NList::Nil)));
-                    }
+                    NList::Nil => (),
                     NList::Cons(h2, t2) => {
                         instantiate!(le(h, h2));
                         instantiate!(le(x, h2));
-                        instantiate!(sorted(NList::Cons(x, NList::Cons(h2, t2))));
                         instantiate!(sorted(NList::Cons(h2, insort(x, t2))));
                         tip_77(x.clone(), *t.clone());
                     }

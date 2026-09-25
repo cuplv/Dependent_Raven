@@ -39,7 +39,6 @@ mod tip_benchmarks {
             Nat::Z => match b {
                 Nat::Z => (),
                 Nat::S(b_prime) => {
-                    instantiate!(sub(Nat::Z, b_prime));
                     ()
                 }
             },

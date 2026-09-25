@@ -40,7 +40,6 @@ mod tip_benchmarks {
         match x {
             Nat::Z => (),
             Nat::S(x_min) => {
-                instantiate!(Nat::S(add(x_min, Nat::S(y))));
                 add_succ_r(*x_min, y)
             }
         }
