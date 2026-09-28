@@ -32,7 +32,7 @@ Never weaken a spec, never comment out a property, never mark a test
 ignored.
 
 **Inputs and the only solver run.** Progress comes from reading three
-artifacts — the trial source file, `logs/<goal>_counterexample.smt2`, and
+artifacts — the trial source file, `logs/<goal>_instantiated_terms.smt2`, and
 `logs/<goal>_failed_query.smt2` — and from re-running the trial file with
 `cargo test --test <file>`. That is the only solver invocation. Do NOT
 probe: never append asserts to a failed query, never run z3/cvc5 by hand,
@@ -71,8 +71,8 @@ Defining a helper without calling it changes nothing.
 ## 3. Artifacts and commands
 
 Identical to raven-instantiate §3 (run from `test_suite/`, one run
-reports every failing VC, counterexample at
-`logs/<lemma>_vc_<k>_counterexample.smt2`, lemma-keyed logs). One
+reports every failing VC, instantiated terms at
+`logs/<lemma>_vc_<k>_instantiated_terms.smt2`, lemma-keyed logs). One
 addition: a constructed helper's failing VCs are named after the HELPER
 (`max_comm_vc_6`) and get their own counterexamples — a helper failure
 and the target's remaining failures appear in the SAME run; the helper's

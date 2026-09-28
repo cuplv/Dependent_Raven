@@ -79,7 +79,7 @@ pub fn emit(program: &Program, goal: &Goal, verdict: &str, path: &str) -> Result
     }
 
     let mut out = String::new();
-    out.push_str("; ravencheck counterexample\n");
+    out.push_str("; ravencheck instantiated terms\n");
     // [ENG] `sat`: the solver found a countermodel. `unknown`: no answer within
     //       the time limit; the file is still the goal's ledger view and the
     //       frontier procedure applies, but no countermodel is known to exist.

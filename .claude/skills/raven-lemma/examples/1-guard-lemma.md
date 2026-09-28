@@ -20,7 +20,7 @@ fn tip_04(n: Nat, xs: NList) {
 ```
 $ cargo test --test prop_04_lemma_gap
 ## > Failed to verify 'tip_04_vc_3': solver found counterexamples.
-## > 💾 Counterexample: logs/tip_04_vc_3_counterexample.smt2
+## > 💾 Instantiated terms: logs/tip_04_vc_3_instantiated_terms.smt2
 ```
 
 ## Counterexample

@@ -47,7 +47,7 @@ fn avl_program() -> frontend::ast::Program {
 // returns, and skipped by default.
 #[test]
 #[ignore = "needs a per-goal time limit, removed when z3 became the in-process solver"]
-fn unknown_goal_is_reported_and_gets_a_counterexample_file() {
+fn unknown_goal_is_reported_and_gets_an_instantiated_terms_file() {
     let report = backend::smt::encode_and_solve(avl_program()).expect_err("balance_left is unprovable");
 
     assert!(report.contains("UNKNOWN"), "expected an UNKNOWN goal:\n{}", report);
@@ -59,8 +59,8 @@ fn unknown_goal_is_reported_and_gets_a_counterexample_file() {
         .find_map(|l| l.strip_prefix("Verification of '").and_then(|s| s.split('\'').next()))
         .map(str::to_string)
         .expect("an UNKNOWN goal name in the report");
-    let cex = std::fs::read_to_string(format!("logs/{}_counterexample.smt2", unknown_goal))
-        .expect("counterexample file written for the UNKNOWN goal");
+    let cex = std::fs::read_to_string(format!("logs/{}_instantiated_terms.smt2", unknown_goal))
+        .expect("instantiated-terms file written for the UNKNOWN goal");
     assert!(cex.contains("; verdict: unknown"), "header lacks the verdict line:\n{}", cex);
     assert!(cex.contains("; definitions:") && cex.contains("; branch : lp = Node("), "file lacks the usual sections:\n{}", cex);
 }

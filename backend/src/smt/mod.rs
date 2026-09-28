@@ -427,7 +427,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             //       out) goal as well. Emission failure must never mask the
             //       verification failure itself, so its error is only printed as
             //       a warning.
-            let cex_path = format!("logs/{}_counterexample.smt2", goal_name);
+            let cex_path = format!("logs/{}_instantiated_terms.smt2", goal_name);
             let mut cex_written = false;
             if let Some(src_goal) = program.goals.iter().find(|g| g.name == goal_name) {
                 let label = if verdict == Verdict::Sat { "sat" } else { "unknown" };
@@ -440,17 +440,17 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 match emitted {
                     Ok(Ok(())) => cex_written = true,
                     Ok(Err(e)) => {
-                        println!("  ⚠️ Failed to write counterexample {}: {}", cex_path, e)
+                        println!("  ⚠️ Failed to write instantiated terms {}: {}", cex_path, e)
                     }
                     Err(_) => println!(
-                        "  ⚠️ Counterexample generation panicked; {} was not written",
+                        "  ⚠️ Instantiated-terms emission panicked; {} was not written",
                         cex_path
                     ),
                 }
             }
-            // Only advertise the counterexample file if it was actually written.
+            // Only advertise the instantiated-terms file if it was actually written.
             let mut cex_line = if cex_written {
-                format!("\n## > 💾 Counterexample: {}", cex_path)
+                format!("\n## > 💾 Instantiated terms: {}", cex_path)
             } else {
                 String::new()
             };
