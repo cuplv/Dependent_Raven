@@ -1,0 +1,72 @@
+{
+  "A": ["A!0"],
+  "AList": ["AList!2", "AList!3", "AList!1", "ANil", "AList!0"],
+  "B": ["B!0"],
+  "BList": ["BNil", "BList!1", "BList!2", "BList!0", "BList!3"],
+  "Nat": ["Nat!1", "Z", "Nat!0"],
+  "PList": ["PNil", "PList!4", "PList!0", "PList!2", "PList!3", "PList!1"],
+  "Pair": ["Pair!0"],
+  "xs": "AList!1",
+  "ys": "BList!1",
+  "n": "Nat!1",
+  "n_min": "Nat!0",
+  "h": "A!0",
+  "t": "AList!0",
+  "_h2": "B!0",
+  "t2": "BList!0",
+  "take_a": {
+    "(Nat!1, AList!1)": "AList!3",
+    "(Nat!1, ANil)": "ANil",
+    "(Z, AList!2)": "ANil",
+    "(Z, AList!3)": "ANil",
+    "(Z, AList!1)": "ANil",
+    "(Z, ANil)": "ANil",
+    "(Z, AList!0)": "ANil",
+    "(Nat!0, AList!0)": "AList!2"
+  },
+  "take_b": {
+    "(Nat!1, BNil)": "BNil",
+    "(Nat!1, BList!1)": "BList!3",
+    "(Z, BNil)": "BNil",
+    "(Z, BList!1)": "BNil",
+    "(Z, BList!2)": "BNil",
+    "(Z, BList!0)": "BNil",
+    "(Z, BList!3)": "BNil",
+    "(Nat!0, BList!0)": "BList!2"
+  },
+  "take_p": {
+    "(Nat!1, PNil)": "PNil",
+    "(Nat!1, PList!2)": "PList!3",
+    "(Z, PNil)": "PNil",
+    "(Z, PList!4)": "PNil",
+    "(Z, PList!0)": "PNil",
+    "(Z, PList!2)": "PNil",
+    "(Z, PList!3)": "PNil",
+    "(Z, PList!1)": "PNil",
+    "(Nat!0, PList!0)": "PList!1"
+  },
+  "zip": {
+    "(AList!2, BList!2)": "PList!1",
+    "(AList!3, BNil)": "PNil",
+    "(AList!3, BList!3)": "PList!4",
+    "(AList!1, BNil)": "PNil",
+    "(AList!1, BList!1)": "PList!2",
+    "(ANil, BNil)": "PNil",
+    "(ANil, BList!1)": "PNil",
+    "(ANil, BList!2)": "PNil",
+    "(ANil, BList!0)": "PNil",
+    "(ANil, BList!3)": "PNil",
+    "(AList!0, BList!0)": "PList!0"
+  },
+  "ACons": {
+    "(A!0, AList!2)": "AList!3",
+    "(A!0, AList!0)": "AList!1"
+  },
+  "BCons": {
+    "(B!0, BList!2)": "BList!3",
+    "(B!0, BList!0)": "BList!1"
+  },
+  "S": {
+    "Nat!0": "Nat!1"
+  }
+}

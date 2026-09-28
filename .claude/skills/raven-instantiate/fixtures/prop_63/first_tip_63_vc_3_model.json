@@ -1,0 +1,51 @@
+{
+  "NList": ["Nil", "NList!3", "NList!2", "NList!1"],
+  "Nat": ["Nat!4", "Z", "Nat!5", "Nat!2", "Nat!1", "Nat!3", "Nat!7", "Nat!6"],
+  "xs": "NList!2",
+  "n": "Nat!6",
+  "n_min": "Nat!1",
+  "t": "NList!1",
+  "_h": "Nat!2",
+  "drop": {
+    "(Z, Nil)": "Nil",
+    "(Z, NList!3)": "NList!3",
+    "(Z, NList!2)": "NList!2",
+    "(Z, NList!1)": "NList!1",
+    "(Nat!5, Nil)": "Nil",
+    "(Nat!1, NList!1)": "NList!3",
+    "(Nat!6, Nil)": "Nil",
+    "(Nat!6, NList!2)": "NList!3"
+  },
+  "last": {
+    "Nil": "Z",
+    "NList!3": "Nat!4",
+    "NList!2": "Nat!7",
+    "NList!1": "Nat!4"
+  },
+  "len": {
+    "Nil": "Z",
+    "NList!2": "Nat!5",
+    "NList!1": "Nat!3"
+  },
+  "lt": {
+    "(Nat!4, Z)": "false",
+    "(Z, Z)": "false",
+    "(Z, Nat!5)": "true",
+    "(Z, Nat!6)": "true",
+    "(Nat!5, Z)": "false",
+    "(Nat!2, Z)": "false",
+    "(Nat!1, Z)": "false",
+    "(Nat!1, Nat!3)": "true",
+    "(Nat!3, Z)": "false",
+    "(Nat!7, Z)": "false",
+    "(Nat!6, Z)": "false",
+    "(Nat!6, Nat!5)": "true"
+  },
+  "Cons": {
+    "(Nat!2, NList!1)": "NList!2"
+  },
+  "S": {
+    "Nat!1": "Nat!6",
+    "Nat!3": "Nat!5"
+  }
+}

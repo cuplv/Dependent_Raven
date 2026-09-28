@@ -1,0 +1,63 @@
+{
+  "NList": ["Nil", "NList!3", "NList!5", "NList!2", "NList!4", "NList!6", "NList!1"],
+  "Nat": ["Nat!4", "Z", "Nat!5", "Nat!2", "Nat!1", "Nat!3", "Nat!7", "Nat!6"],
+  "x": "Nat!1",
+  "s": "NList!2",
+  "n": "Nat!3",
+  "t": "NList!1",
+  "h": "Nat!2",
+  "count": {
+    "(Nat!4, Nil)": "Z",
+    "(Z, Nil)": "Z",
+    "(Nat!5, Nil)": "Z",
+    "(Nat!2, Nil)": "Z",
+    "(Nat!1, Nil)": "Z",
+    "(Nat!3, Nil)": "Z",
+    "(Nat!3, NList!3)": "Nat!5",
+    "(Nat!3, NList!5)": "Nat!6",
+    "(Nat!3, NList!2)": "Nat!4",
+    "(Nat!3, NList!4)": "Nat!5",
+    "(Nat!3, NList!6)": "Nat!7",
+    "(Nat!7, Nil)": "Z",
+    "(Nat!6, Nil)": "Z"
+  },
+  "eq_nat": {
+    "(Z, Z)": "true",
+    "(Z, Nat!7)": "false",
+    "(Z, Nat!6)": "false",
+    "(Nat!3, Nat!2)": "true",
+    "(Nat!3, Nat!1)": "true",
+    "(Nat!7, Z)": "false",
+    "(Nat!6, Z)": "false"
+  },
+  "insort": {
+    "(Nat!1, NList!2)": "NList!5",
+    "(Nat!1, NList!1)": "NList!3"
+  },
+  "le": {
+    "(Z, Nat!4)": "true",
+    "(Z, Z)": "true",
+    "(Z, Nat!5)": "true",
+    "(Z, Nat!2)": "true",
+    "(Z, Nat!1)": "true",
+    "(Z, Nat!3)": "true",
+    "(Z, Nat!7)": "true",
+    "(Z, Nat!6)": "true",
+    "(Nat!1, Nat!2)": "false",
+    "(Nat!7, Z)": "false",
+    "(Nat!6, Z)": "false"
+  },
+  "sort": {
+    "Nil": "Nil"
+  },
+  "Cons": {
+    "(Nat!2, NList!3)": "NList!5",
+    "(Nat!2, NList!1)": "NList!2",
+    "(Nat!1, NList!2)": "NList!6",
+    "(Nat!1, NList!1)": "NList!4"
+  },
+  "S": {
+    "Nat!4": "Nat!7",
+    "Nat!5": "Nat!6"
+  }
+}

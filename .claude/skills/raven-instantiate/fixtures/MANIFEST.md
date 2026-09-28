@@ -1,51 +1,29 @@
 # Fixture manifest
 
-Broken proof files and the counterexamples they produce, used as raw material
-for the skill's `examples/` and for acceptance-testing the skill. Each
-`*_skill_example.rs` is a copy of a verified prop from `test_suite/tests/`
-with only its `instantiate!` hint(s) removed (proof structure and induction
-hypotheses intact). To run one: copy it into `test_suite/tests/` and run
-`cargo test --test <name>` from `test_suite/`; the counterexample lands in
-`test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`. Note the log file name
-comes from the LEMMA name, so a fixture and its original prop overwrite each
-other's logs.
+The models behind `examples/`, verbatim as the verifier wrote them
+(`test_suite/logs/<lemma>_vc_<k>_model.json`, z3 5.1.0 in process). Each
+directory is one benchmark; each file is one failing goal of one round. The
+prefix says the round: `first_` = the attempt with no hint in that branch,
+`third_`/`fourth_` = later rounds of the same goal.
 
-| Fixture | Source prop | Removed | Failing VC | Fix (restore in the failing branch) |
+To regenerate a fixture: copy the committed `test_suite/tests/<prop>.rs` to a
+temporary name in the same directory, remove the hints named in the "Removed"
+column (nothing else), run `cargo test -p test_suite --test <temp>`, take the
+model file from `test_suite/logs/`, delete the temporary copy. Log files are
+keyed by lemma name, so run one fixture at a time. Tag names (`Nat!4`) differ
+between runs; only the rows relating them are stable.
+
+| Fixture | Source | Removed | Failing goal(s) | Example |
 |---|---|---|---|---|
-| `prop_09_skill_example.rs` | `prop_09.rs` | 1 hint | `tip_nine_vc_6` | `instantiate!(Nat::S(add(j_prime, k)));` |
-| `prop_08_skill_example.rs` | `prop_08.rs` | 2 hints | `tip_eight_vc_5` | `instantiate!(Nat::S(add(i_prime, j)));` and `instantiate!(Nat::S(add(i_prime, k)));` |
-| `prop_list_append_skill_example.rs` | `prop_list_append.rs` | 2 hints | `app_assoc_vc_5` | `instantiate!(List::Cons(h, app(t, y)));` and `instantiate!(List::Cons(h, app(t, app(y, z))));` |
-| `prop_02_skill_example.rs` | `prop_02.rs` | 1 guard hint | `tip_02_vc_19` | `instantiate!(eq_nat(n, h));` |
-| `prop_23_skill_example.rs` (TRIAL — not an example) | `prop_23.rs` | 2 hints | `tip_23_vc_6` | `instantiate!(Nat::S(max(a_min, b_min)));` and `instantiate!(Nat::S(max(b_min, a_min)));` |
+| `demo_two_plus/` | `demo_two_plus.rs` (in this directory; not a suite file) | body empty | `two_plus_vc_1` | 0 |
+| `prop_71/` | `tests/prop_71.rs` | `lt(y, h)`, `eq_nat(x, h)` | `tip_71_vc_2` | 1 |
+| `prop_64/` | `tests/prop_64.rs` | `app(t2, Cons(x, Nil))` | `tip_64_vc_3` | 2, and its `_instantiated_terms.smt2` (captured under the earlier `_counterexample` name) for 6 |
+| `prop_82/` | `tests/prop_82.rs` | `take_a(n_min, t)`, `Pair::P(h, h2)` | `tip_82_vc_3`, `tip_82_vc_4` | 3 |
+| `prop_53/` | `tests/prop_53.rs`, helper `count_insort` | `count(n, s)` (round A), then `count(n, t)` (round B); the three guard hints kept | `count_insort_vc_2`, two rounds | 4 |
+| `prop_59/` | `tests/prop_59.rs` | helper `app_nil` replaced by induction on `xs` with the IH call | `tip_59_vc_2` | 5A |
+| `prop_63/` | `tests/prop_63.rs` | the case split on `t` | `tip_63_vc_3` | 5B |
+| `prop_29/` | `tests/prop_29.rs` | helper `eq_refl` (and the `Cons` arm's guard hint) | `tip_29_vc_1` | 5C |
 
-What each example teaches:
-
-- **prop_09** — the canonical case: one pinned unfolding (`add(j, k)` under
-  `j = S(j_prime)`) whose wrapped-constructor result is absent from the ledger.
-  `prop_09_failed_query.smt2` is also captured here as the annotation source
-  for `reference/smt-encoding.md`.
-- **prop_08** — two parallel candidates from sibling terms in ONE branch
-  (`add(i, j)` and `add(i, k)` both unfold under `i = S(i_prime)`); both must
-  be added.
-- **prop_list_append** — two candidates from different call sites of the same
-  equation (`app(x, y)` and `app(x, app(y, z))` under `x = Cons(h, t)`);
-  each alone is insufficient (minimality), and a deep hint covers its subterms.
-- **prop_02** — the guard-term case: no unfolding RESULT is missing, but the
-  guard `eq_nat(n, h)` of count's if-equations has no definedness switch, so
-  both guarded equations are vacuous in both directions. The ledger "looks
-  complete" — detection needs the guard-terms-are-candidates rule.
-
-Fixture counterexamples were captured with the skeleton emitter (steps 0-6:
-header / definitions / declarations / path asserts / ledger / negated goal).
-Regenerate them after the engine lands (equalities + trace sections) so the
-examples match what users actually see.
-
-## Trial fixtures (held out of examples/ — acceptance testing only)
-
-`prop_23_skill_example.rs` is deliberately NOT referenced by any example:
-it exists to acceptance-test the skill on unseen material. Trial protocol:
-start from a clean tree, copy the fixture into `test_suite/tests/`, open a
-FRESH session, invoke `/raven-instantiate` with a minimal prompt naming the
-failing test, and do not steer. Afterward audit with `git status` /
-`git diff` (only added `instantiate!` lines may appear), record the outcome
-in `trial-notes.md`, and remove the copy from `tests/`.
+The full round-by-round captures (including counterexample ledger files and
+the rounds not used by the examples) live outside the skill in
+`doc/skill_fixtures/`, with their own README classifying every failure.

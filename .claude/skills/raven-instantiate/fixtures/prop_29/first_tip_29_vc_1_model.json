@@ -1,0 +1,20 @@
+{
+  "NList": ["Nil", "NList!1"],
+  "Nat": ["Z", "Nat!1"],
+  "xs": "Nil",
+  "x": "Nat!1",
+  "elem": {
+    "(Z, Nil)": "false",
+    "(Nat!1, Nil)": "false",
+    "(Nat!1, NList!1)": "false"
+  },
+  "eq_nat": {
+    "(Z, Z)": "true"
+  },
+  "ins1": {
+    "(Nat!1, Nil)": "NList!1"
+  },
+  "Cons": {
+    "(Nat!1, Nil)": "NList!1"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "Nat": ["Nat!5", "Nat!1", "Nat!6", "Nat!3", "Nat!2", "Z", "Nat!4"],
+  "x": "Nat!3",
+  "add": {
+    "(Nat!2, Nat!3)": "Nat!4",
+    "(Z, Nat!5)": "Nat!5",
+    "(Z, Nat!1)": "Nat!1",
+    "(Z, Nat!6)": "Nat!6",
+    "(Z, Nat!3)": "Nat!3",
+    "(Z, Nat!2)": "Nat!2",
+    "(Z, Z)": "Z",
+    "(Z, Nat!4)": "Nat!4"
+  },
+  "S": {
+    "Nat!5": "Nat!6",
+    "Nat!1": "Nat!2",
+    "Nat!3": "Nat!5",
+    "Z": "Nat!1"
+  }
+}

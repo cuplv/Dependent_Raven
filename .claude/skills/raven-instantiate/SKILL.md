@@ -1,218 +1,172 @@
 ---
 name: raven-instantiate
-description: Diagnose a failed ravencheck proof and find missing instantiate!
-  hints by analyzing the generated counterexample file
-  (logs/<goal>_counterexample.smt2). Use when a test_suite proof fails with
-  "solver found counterexamples" or "solver returned UNKNOWN" (no answer
-  within the per-goal time limit; the file is written in both cases).
-  Finds missing instantiations only; when
-  instantiation cannot fix the failure, produces a named diagnosis (missing
-  lemma / missing case split / missing recursive call) instead of forcing
-  a fix.
+description: Repair a failed ravencheck proof by adding missing instantiate!
+  hints, reading the countermodel the verifier writes for each failing goal
+  (test_suite/logs/<goal>_model.json) against the source program. Use when a
+  test_suite proof fails with "solver found counterexamples" or "solver
+  returned UNKNOWN". Adds hints only; when the model shows the failure is not
+  a missing hint, reports which of three tells it is (lemma / case split /
+  guard that must hold) instead. Without a model (UNKNOWN, out of memory,
+  timeout) it falls back to a frontier search over the instantiated-terms
+  ledger the driver writes for every failing goal.
 ---
 
 # raven-instantiate
 
 ## 1. Scope and hard constraints
 
-The ONLY permitted edit is adding `instantiate!(...)` lines inside the
-failing branch of the failing lemma (and removing lines YOU added, during
-minimization — which happens ONLY when the user asked for it, §5).
-Everything else is read-only: `Lemma(...)` specifications,
-function definitions, match skeletons, recursive and helper calls, other
-tests. Never weaken a spec, never comment out a property, never mark a
-test ignored. If no permitted edit can succeed, the correct output is a
-description of the final state, not a forced green test.
+The ONLY permitted edit is adding `instantiate!(...)` lines inside the failing
+branch of the failing lemma. Everything else is read-only: `Lemma(...)`
+specifications, function definitions, match skeletons, recursive and helper
+calls, other tests. Never weaken a spec, never comment out a property, never
+mark a test ignored. Hints are never removed while the proof is red, and after
+it is green only if the user asked for minimization (keyword `minimize`). If no
+permitted edit can succeed, the correct output is a report (§6), not a forced
+green test.
 
-The constraint always applies. A mechanical `git diff` self-audit is
-available as an OPTIONAL verification layer: perform it when the user asks
-for an audited run, or on your own initiative whenever you are unsure an
-edit stayed inside the envelope (see step 4). By default, simply follow
-the constraint.
+A hint is always sound: `instantiate!(t)` asserts that the application `t` is
+defined, which is true of the real (total) functions. The risk of an edit is
+never a false proof, only a wasted round.
 
-Adding hints is always sound (a hint is a true totality fact about the
-real functions — `reference/theory.md`, Fact 1), so the risk of an edit is
-never a false proof; the risk is only wasted effort and wrong diagnosis,
-which the procedure and stop conditions control.
+## 2. Inputs
 
-## 2. The ground rule
+Two files, nothing else:
 
-Functions in the encoding are PARTIAL: a defining equation fires only if
-every application subterm it mentions — including the guard term of an
-`if` — has a definedness switch in the counterexample's "instantiated
-terms" ledger. An absent term does not make equations false; it makes them
-silently vacuous. Why this is so is visible in the query text: see
-`reference/smt-encoding.md`.
+- the source: `test_suite/tests/<file>.rs` — definitions and the failing
+  lemma, whose `match` arms are the branches;
+- the model: `test_suite/logs/<lemma>_vc_<k>_model.json`, written for every
+  goal the solver answers `sat`. Format: `reference/model-format.md`.
 
-## 3. Artifacts and commands
+Run from the repository root: `cargo test -p test_suite --test <file>`. One
+run solves every goal and reports every failing one. Log files are keyed by
+lemma name; two files sharing a lemma name overwrite each other's logs. A goal
+reported `UNKNOWN` (no answer, out of memory, or — once a limit is set — a
+timeout) has no model; for it the driver still writes
+`logs/<lemma>_vc_<k>_instantiated_terms.smt2`, and the procedure switches to
+ledger mode (§7).
 
-- Run tests from `test_suite/`: `cargo test --test <file>` (file =
-  `tests/<file>.rs`).
-- One run solves EVERY goal and reports EVERY failing one (it does not
-  stop at the first). A goal fails either with "solver found
-  counterexamples" (`sat`) or with "solver returned UNKNOWN" (no answer
-  within the per-goal limit, 30 s by default, `RAVENCHECK_TIMEOUT` to
-  change). Both write `test_suite/logs/<lemma>_vc_<k>_counterexample.smt2`;
-  the file's `; verdict:` line says which. The file is built from the
-  goal and its ledger, not from a solver model, so the procedure below is
-  the same for both verdicts. An UNKNOWN goal is usually a goal whose
-  countermodel is large (many hypotheses and witnesses); it is not
-  evidence that the goal is provable. The lemma
-  is a `#[val(... -> Lemma(...))]` function in some `tests/*.rs`; the
-  counterexample's `branch :` line identifies the match arm the VC belongs
-  to — that arm is where hints go. Goals are numbered per generated
-  obligation; argument checks against unrefined parameters generate none.
-- Log files are keyed by LEMMA name, not file name: two test files sharing
-  a lemma name overwrite each other's logs; the last run owns them.
-- How to read the file: `reference/counterexample-format.md`.
+## 3. Reading the model
 
-## 4. Procedure
+- A row `f: (a…) → r` means `f(a…)` is defined with value `r`. An **absent
+  row** means the application is undefined there, so no equation mentioning
+  it can fire. That absence is the only fact this skill acts on.
+- Rows exist for named terms (goal, hypotheses, hints), for equations with no
+  inner term (`add(Z, y) = y` gives `(Z, y) → y` for every `y`), and
+  arbitrarily. Which is which does not matter.
+- An element that is the output of a constructor row has a known shape; one
+  that is the output of none is **junk**. A junk result of a function whose
+  argument's shape is known is an equation that could not fire.
+- The **branch** is the set of constructor rows tying the pattern variables to
+  the goal variables (`Cons: (_h, t) → xs`). A variable the branch does not
+  fix is one with no such row.
 
-1. **Run and read.** Run the failing test; open the counterexample file
-   of EACH failing VC. Identify lemma, VC, branch, definitions block, and
-   the ledger. Different VCs are different branches: work each one's
-   frontier separately (steps 2–3), then make all edits in one pass.
+## 4. The walk
 
-2. **Coverage pre-check.** Every pattern variable bound in the `branch :`
-   line must appear in some hypothesis group of the ledger. A variable in
-   no hypothesis group signals a missing recursive call (induction
-   hypothesis) on it — proof structure, not instantiation; stop and
-   report (see §5).
+For each failing goal, on its own model:
 
-3. **Frontier round.** Build a table with one row per application term in
-   the ledger (imitate the tables in `examples/`):
-   - columns: application | scrutinee(s) | shape known? | one-step result
-     | absent terms;
-   - a scrutinee's shape is known from the `branch :` line, from a literal
-     constructor argument, OR from an equality established by an
-     already-justified unfolding (a scrutinee equal to a defined
-     constructor term is pinned — do not skip this third source);
-   - for a pinned application, instantiate the matching equation of the
-     definitions block; the one-step result terms are the equation's
-     right-hand side subterms AND, for an `if` arm, the guard term;
-   - candidates = result terms absent from the ledger, EXCLUDING the
-     outermost application of the right-hand side: since 2026-09-18 the
-     encoding asserts that term's existence itself (the relabs peephole,
-     `reference/theory.md` Fact 1) whenever the pinned application and
-     the inner terms exist. So the candidates are the INNER absent
-     applications of the right-hand side and the guard term. If an
-     outermost result is the only thing missing, the branch will already
-     be green -- re-check pinning before concluding anything.
+1. Substitute the variables' elements into the `Lemma` and locate the goal's
+   applications; note which side or hypothesis the model refutes.
+2. For each application whose row is junk (or whose value is wrong for the
+   goal), take the equation of its definition that applies in this branch —
+   the constructor cases the branch fixes select it — and list that
+   equation's **inner terms**: the applications on its right-hand side and,
+   for an `if`, its guard.
+3. Look each inner term up. Present → recurse into it (step 2). **Absent, with
+   arguments the branch fixes** → a candidate (§5). Absent because an argument
+   is a variable the branch does not fix → a stop tell (§6).
+4. Collect the candidates of every failing goal, add them all (§7), re-run
+   once, and repeat on the new models. Each round exposes one level; new
+   absent rows on the walk are progress. Stop when a model shows no new one.
 
-4. **Edit and re-run.** Add ALL of the round's candidates, for EVERY
-   failing branch, as `instantiate!` lines in that branch, before the
-   tail/recursive call (syntax: §6), then re-run the test once.
+Imitate the tables in `examples/`: application | row? | equation, inner terms
+| verdict.
 
-   Do NOT minimize, filter, or second-guess candidates at this stage. Add
-   every candidate the round produced, including ones that look redundant,
-   unlikely, or already implied by another hint. Adding is always sound
-   (§1); a candidate left out costs an extra round and can hide progress,
-   while a surplus hint costs nothing. Hints are never removed while the
-   proof is red, and after it is green only if the user asked for
-   minimization (step 5).
+## 5. Candidates — the two things a hint fixes
 
-   *Optional self-audit* — do this when the user requested an audited run,
-   or whenever you are unsure an edit stayed inside §1's envelope:
+- **Inner term.** An application on the right-hand side of the applicable
+  equation has no row (`app(t2, [x])` under `t = Cons(_h2, t2)`;
+  `take_a(n', t)`; a constructor application such as `Pair::P(h, h2)` when the
+  whole `P` table is absent). Hint it.
+- **Guard that only has to exist.** The guard of the applicable `if` has no
+  row, and *either* value lets the branch close (one outcome closes by the
+  goal or a hypothesis, the other by the induction hypothesis). Hint it.
 
-   ```
-   git diff -- test_suite/tests/<file>.rs
-   ```
+Add every candidate of the round, for every failing branch, before one
+re-run; do not second-guess or filter.
 
-   Every `+` line must match `instantiate!( ... );` (whitespace aside) and
-   there must be NO `-` lines except `instantiate!` lines you yourself
-   added in an earlier round. Anything else — a changed spec, a touched
-   definition, a reordered statement — must be reverted immediately.
-   (The audit only sees TRACKED files; if the failing test file is a
-   freshly copied, untracked fixture, `git add` it first or the diff is
-   silently empty.)
+## 6. Stop tells — when the missing fact is not a hint
 
-5. **Loop or finish.**
-   - Green: STOP and report (§7). Do not minimize unless the user asked
-     for it — by the invocation keyword `minimize` (e.g.
-     "/raven-instantiate — minimize") or in so many words. Minimization
-     costs one verifier run per removal batch and is not part of finding
-     the proof; a proof with surplus hints is a finished proof. When it
-     IS requested: this is the only point where hints are removed; since
-     a run reports every failure, remove several hints per run (e.g. all
-     hints of one branch, or half of them), bisect on what re-breaks,
-     keep only the hints whose removal breaks the proof, and report the
-     final set. Never leave a minimization script running after the
-     report.
-   - Still red: re-read the REGENERATED counterexamples (some branches
-     may now be green — only the still-failing ones are written). Your hints now
-     appear in the ledger (group "user hints"), which pins deeper
-     scrutinees and enables the next layer of unfoldings. Repeat from
-     step 3. Rounds correspond to unrolling depth: numeral-shaped goals
-     legitimately take one round per literal constructor layer — steady
-     new candidates are progress, not failure. Termination is governed by
-     the stop conditions (§5).
+- **Algebraic.** The stuck application's recursion argument is a tag the
+  branch does not fix, and the goal equates the application with something
+  else (`app(t, Nil) = NList!3`, `t = NList!1`). A lemma is missing.
+- **Shape.** The next equation matches on a variable that is a tag the branch
+  does not fix (`last(Cons(_h, t))`, `t` the output of no `Cons` row). A case
+  split is missing.
+- **Guard that must hold.** The guard row is missing and only one value closes
+  the goal, on such a variable (`eq_nat(x, x)` must be true; `eq_nat(x, y)`
+  must be false under `lt(x, y)`). Naming it lets the solver pick the wrong
+  value. A lemma about the guard is missing.
 
-## 5. Stop conditions: NONE (experimental mode)
+On a tell: add no hint for that goal; finish the other goals' candidates if
+any; report the tell with the model lines that show it (§9).
 
-This version deliberately has no stop conditions: keep running the
-procedure loop (frontier round -> add candidates -> re-run) for as long as
-you can act, even when a round finds no new candidate. If the frontier
-seems empty, re-examine pinning (including the derived-equality source of
-step 3) and continue; if you genuinely cannot find any further permitted
-edit, describe the final state — the ledger, the last frontier table, and
-what you observe about the two goal sides — WITHOUT concluding a
-diagnosis, and without ever leaving the permitted-edit envelope of §1.
+## 7. No model: ledger mode
 
-A designed (inactive) stop-condition scheme exists at
-`reference/stop-conditions-draft.md`; do NOT apply it — the point of this
-mode is to observe behavior without it.
+Entered only for a failing goal with no `_model.json`. The inputs are the
+source and the goal's `_instantiated_terms.smt2`: its header (`lemma`, `goal`,
+`branch`, the `definitions` block) and the `; instantiated terms:` groups —
+the applications the query has in hand, from the goal, the hypotheses, the
+patterns and the user hints. There is no value information, so nothing says
+which application is stuck; the method is a frontier search over the ledger:
 
-**User-imposed unroll limit (optional, keyword: `unroll-limit`).** There
-is NO default limit of any kind. But if the invocation specifies one
-(e.g. "/raven-instantiate — unroll-limit 2"), honor it as a PER-FUNCTION
-limit: track,
-for each function, how many one-step unfoldings of its definition you
-have performed across all rounds of this VC; once a function reaches the
-limit, freeze it — propose no further candidates that require unfolding
-it. If the proof cannot close under the restriction, report the capped
-state: the per-function unfold counts, the unfoldings the limit blocked,
-and the last frontier table. A frontier that is empty only because of
-frozen functions is LIMITED saturation — it licenses no conclusion about
-the failure's nature (the blocked unfoldings might have closed the
-proof); say so explicitly, and never present it as exhaustion.
+1. One row per application in the ledger whose scrutinee's shape the branch
+   fixes: application | shape | equation → inner terms and guard | in the
+   ledger?
+2. Candidates = the inner terms and guards absent from every group. The
+   equation's outermost result is never a candidate (the peephole).
+3. Add all candidates of all such goals, re-run once, re-read. A hint now
+   appears under `from the user hints:` and opens the next level.
+4. Cap unfolding at two levels per function per goal; a frontier emptied only
+   by that cap is *limited*, not saturated, and the report must say so.
 
-## 6. Edit conventions (top three; rest in `reference/proof-language.md`)
+Read the outcome of each re-run: `unsat` — done (an UNKNOWN goal may have
+been true all along, and the hint made it tractable); `sat` with a model —
+switch that goal to model mode; still no model — next frontier round. A
+round that adds no candidate is **saturation**: report it with the last table.
+The three tells of §6 cannot be read without a model; do not guess a lemma
+from the ledger. Ledger mode is the expensive mode — it unfolds every listed
+application, not just the failing chain — and is used only when no model
+exists. Example: `examples/6-ledger-mode.md`.
 
-- `instantiate!` contents are RECORDED, not compiled: no `Box::new`, no
+## 8. Edit conventions
+
+- `instantiate!` contents are recorded, not compiled: no `Box::new`, no
   `.clone()`, no ownership concerns inside the macro.
-- Use binder names in scope in the failing branch (`j_prime`, `h`, `t`);
-  a hint may reference only variables bound by that branch.
-- A `_` inside a constructor pattern (`Nat::S(_)`) is fine. A bare `_ =>`
-  arm is allowed after at least one constructor arm: it stands for the
-  constructors the earlier arms leave uncovered, and in a proof body it
-  yields one VC per such constructor (each may need its own hints).
+- Use the binder names in scope in the failing branch (`n_min`, `h`, `t`); a
+  hint may reference only variables bound by that branch. Rename a `_`-prefixed
+  binder (`_h2` → `h2`) when a hint needs it.
+- Place hints in the failing arm, before its recursive or helper call.
 
-## 7. Report format
+## 9. Report
 
-On success: the hints added (grouped by round), the verified state, and —
-only if minimization was requested — the minimization result. When no
-further permitted edit is possible: the
-final-state description of §5 — ledger, last frontier table, observations
-about the goal sides — with no diagnosis verdict (designed report
-templates live, inactive, in `reference/stop-conditions-draft.md`).
+Green: the hints added, grouped by round and branch. A tell: the goal, the
+branch, the tell's name, the two or three model rows that show it, and the
+fact or case split the proof appears to need — with no edit made for it.
+Ledger mode: the goals handled without a model, their verdict after each
+round, and on saturation (or a cap) the last frontier table.
 
-## 8. Worked examples (imitate their frontier tables exactly)
+## 10. Examples (read 0 first; each is one model, one walk)
 
-- `examples/1-wrapped-constructor.md` — one pinned unfolding, one missing
-  wrapped term (the canonical case).
-- `examples/2-parallel-hints.md` — sibling applications in one branch;
-  a round's candidates are a set, added together.
-- `examples/3-multiple-call-sites.md` — the same equation stuck at two
-  call sites; joint necessity; deep hints cover subterms.
-- `examples/4-guard-term.md` — the ledger looks complete but the
-  `if`-guard has no switch; guard terms are candidates too.
+- `examples/0-the-walk.md` — the procedure on a ten-line Nat lemma.
+- `examples/1-two-guards.md` — two guards in one branch; a hypothesis already
+  valued needs nothing.
+- `examples/2-inner-term-fixed-constructor.md` — junk result below a
+  constructor the branch fixes.
+- `examples/3-two-branches-constructor-terms.md` — two failing goals, `Nat`-
+  and `Pair`-typed inner terms, one re-run.
+- `examples/4-nested-rounds.md` — one level per round; when to keep going.
+- `examples/5-hand-off.md` — the three stop tells on real models.
+- `examples/6-ledger-mode.md` — no model: the frontier over the
+  instantiated-terms file, checked against example 2.
 
-## 9. Reading order
-
-Working path: this file + the examples. On demand:
-`reference/counterexample-format.md` (the artifact, section by section),
-`reference/smt-encoding.md` (why the ground rule holds — background only;
-never diagnose from the raw query), `reference/proof-language.md` (writing
-legal edits), `reference/theory.md` (the three facts licensing the
-procedure and its stops). `fixtures/` holds the broken proofs and captured
-artifacts behind the examples, with a MANIFEST for regenerating them.
+`fixtures/MANIFEST.md` says how each example's model was produced.
