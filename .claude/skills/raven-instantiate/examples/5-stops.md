@@ -1,10 +1,11 @@
-# Example 5 — the three tells that end the walk without a hint
+# Example 5 — three walks that stop without a hint
 
 Three goals from three benchmarks, each out of this skill's reach. The correct
-output for each is a report naming the tell — not a hint, and not another round.
+output for each is a one-line stop report — not a hint, not another round, and
+not a guess at which lemma is missing (that is the lemma skill's question).
 (`fixtures/prop_59`, `fixtures/prop_63`, `fixtures/prop_29`)
 
-## A. Algebraic — `app(t, Nil) ≠ t` at a variable no branch fixes (prop_59)
+## A. `app(t, Nil)` at a variable no branch fixes (prop_59)
 
 ```rust
 #[val((xs: NList, ys: NList) -> Lemma(implies(ys == NList::Nil, last(app(xs, ys)) == last(xs))))]
@@ -30,12 +31,11 @@ fn tip_59(xs: NList, ys: NList) {
 | `app(xs, Nil)` | yes → `NList!4 = Cons(_h, NList!3)` | fired | fine |
 | `app(t, Nil)` = `(NList!1, Nil)` | yes → `NList!3`, junk | `t` is the output of **no** `Cons` row and the branch does not fix it: no equation of `app` applies | **stop** |
 
-`t` is a tag, `app(t, Nil)` and `t` are different elements, and the equation the
-goal needs — `app(t, Nil) = t` — is not a defining equation of `app` at all. No
-term can be named that makes it fire. Report: *algebraic; the missing fact is
-`app(t, Nil) == t` for all `t` (a lemma by induction on `t`).*
+`t` is a tag, so no equation of `app` applies at `app(t, Nil)`, and no term can
+be named that makes one apply. Report:
+`STOP at app(t, Nil): t is a variable the branch does not fix.`
 
-## B. Shape — a function matching on a variable that is a tag (prop_63)
+## B. A function matching on a variable that is a tag (prop_63)
 
 ```rust
 #[val((n: Nat, xs: NList) -> Lemma(implies(lt(n, len(xs)), last(drop(n, xs)) == last(xs))))]
@@ -67,11 +67,11 @@ fn tip_63(n: Nat, xs: NList) {
 | IH `last(drop(n', t)) == last(t)` | `Nat!4 = Nat!4` | | holds |
 | `last(xs)` = `last(Cons(_h, t))` | yes → `Nat!7` | `last(Cons(h, t))` matches on `t`; `t` is the output of no `Cons` row and the branch does not fix it | **stop** |
 
-The next equation needs the *shape* of `t`, and a hint can only name terms, not
-give a variable a constructor. Report: *shape; the proof needs a case split on
-`t` inside the `Cons` arm (for `t == Nil` the hypothesis `lt(n', Z)` is false).*
+The next equation needs the shape of `t`, and a hint can only name terms, not
+give a variable a constructor. Report:
+`STOP at last(Cons(_h, t)): t is a variable the branch does not fix.`
 
-## C. Guard, must hold — the missing guard's value is dictated (prop_29)
+## C. A guard with only one closing value (prop_29)
 
 ```rust
 #[val((x: Nat, xs: NList) -> Lemma(elem(x, ins1(x, xs))))]
@@ -100,16 +100,17 @@ fn tip_29(x: Nat, xs: NList) {
 | guard `eq_nat(x, x)` = `(Nat!1, Nat!1)` | **no** | looks like a guard candidate — but only the value `true` closes the goal (`false` gives `elem(x, Nil) = false`, the model's refutation), and `x` is a tag the branch does not fix | **stop** |
 
 Naming `eq_nat(x, x)` would give it a row, and the solver would choose `false`.
-The fact needed is about the guard's *value* on an arbitrary `x`. Report: *guard
-must hold; the missing fact is `eq_nat(x, x)` for all `x` (a lemma by induction
-on `x`).* Compare the `Cons` arm of the same lemma, where `eq_nat(x, _h)` is a
-plain guard candidate because either value closes (example 1).
+Report: `STOP at guard eq_nat(x, x): only one value closes, on a variable the
+branch does not fix.` Compare the `Cons` arm of the same lemma, where
+`eq_nat(x, _h)` is a plain guard candidate because either value closes
+(example 1).
 
-## The three tells, in one line each
+## The two stop conditions
 
-- **Algebraic**: the stuck application's recursion argument is a tag the branch
-  does not fix, and the goal equates it with something else.
-- **Shape**: the next equation matches on a variable that is a tag the branch
-  does not fix.
-- **Guard must hold**: the guard row is missing, and the goal or a hypothesis
-  needs one specific value of it on such a variable.
+- the next equation needs a variable the branch does not fix (A and B: a tag
+  with no constructor row at the point the equation matches);
+- the guard has no row and only one of its values closes the goal, on such a
+  variable (C).
+
+Everything else — which fact or case split the stop calls for — is the lemma
+skill's reading of the same model.

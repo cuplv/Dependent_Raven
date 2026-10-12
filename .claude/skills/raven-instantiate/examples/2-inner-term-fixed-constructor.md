@@ -74,4 +74,4 @@ NList::Cons(_h2, t2) => {
 
 Green. Note that the case split on `t` was already in the proof (a shape the
 branch fixes); without it the same model would show `t` as the output of no
-`Cons` row, which is example 5's second tell, not a hint.
+`Cons` row — example 5's case B, a stop, not a hint.

@@ -4,8 +4,8 @@ description: Repair a failed ravencheck proof by adding missing instantiate!
   hints, read off the countermodel the verifier writes for each failing goal
   (test_suite/logs/<goal>_model.json) against the source program. Use when a
   test_suite proof fails with "solver found counterexamples". Adds hints only;
-  when the model shows the failure is not a missing hint, reports which of
-  three tells it is (lemma / case split / guard that must hold) instead.
+  when the model shows the failure is not a missing hint, reports where the
+  walk stopped and why, for the lemma skill to classify.
 ---
 
 # raven-instantiate
@@ -61,23 +61,22 @@ Details: `reference/model-format.md` (open only if a row is ambiguous).
    applications on the right-hand side and, for an `if`, the guard.
 3. Look each inner term up. Row present → recurse (step 2). Row **absent
    with arguments the branch fixes** → candidate (§5). Absent because an
-   argument is a variable the branch does not fix → a stop tell (§5).
+   argument is a variable the branch does not fix → stop (§5).
 4. Add every candidate of every failing goal, re-run once, re-read. Each
    round exposes one more level; a new absent row on the walk is progress;
    stop when a model shows none.
 
-## 5. Candidates and stop tells
+## 5. Candidates and stops
 
 | What the model shows | Verdict | Action |
 |---|---|---|
 | an inner term of the selected equation has no row (`app(t2, [x])` under `t = Cons(_h2, t2)`; `take_a(n', t)`; a constructor term such as `P(h, h2)` when the whole `P` table is absent) | **inner term** | hint it |
-| the `if`'s guard has no row and *either* value closes the arm (one outcome by the goal or a hypothesis, the other by the IH) | **guard, must exist** | hint it |
-| the stuck application's recursion argument is a tag the branch does not fix, and the goal equates the application with something else (`app(t, Nil) = NList!3`, `t = NList!1`) | **algebraic** | stop: a lemma is missing |
-| the next equation matches on a variable that is a tag the branch does not fix (`last(Cons(_h, t))`, `t` the output of no `Cons` row) | **shape** | stop: a case split is missing |
-| the guard row is missing and only one value closes the goal, on such a variable (`eq_nat(x, x)` must be true; `eq_nat(x, y)` must be false under `lt(x, y)`) — naming it lets the solver pick the wrong value | **guard, must hold** | stop: a lemma about the guard is missing |
+| the `if`'s guard has no row and *either* value closes the arm (one outcome by the goal or a hypothesis, the other by the IH) | **guard** | hint it |
+| the next equation needs a variable the branch does not fix (`app(t, Nil)` or `last(Cons(_h, t))` with `t` the output of no `Cons` row), or the guard has no row and only *one* value closes the goal on such a variable (`eq_nat(x, x)` must be true) — naming the term would only let the solver pick the value | **stop** | no hint; report where and why (§8) |
 
-On a tell: add no hint for that goal, finish the other goals' candidates, and
-report the tell with the two or three model rows that show it.
+On a stop: add no hint for that goal, finish the other goals' candidates, and
+report. Which lemma or case split the stop calls for is the lemma skill's
+question, not this one's.
 
 ## 6. The walk in twenty lines
 
@@ -111,9 +110,11 @@ level, `add(Z, x)`, is a universal row).
 
 ## 8. Report
 
-Green: the hints added, by round and branch. A tell: the goal, the branch,
-the tell's name, the model rows that show it, and the fact or case split the
-proof appears to need — with no edit made for it.
+Green: the hints added, by round and branch. A stop: one line per goal —
+`STOP at <application or guard>: <why>` (a variable the branch does not fix,
+or a guard with only one closing value) — with no edit made for it. No rows,
+no classification: the model file holds the evidence and the lemma skill
+reads it.
 
 ## 9. What to open, and when
 
@@ -122,7 +123,7 @@ example when its situation arises: `0-the-walk` (unsure how to start),
 `1-two-guards` (several guards in one arm), `2-inner-term-fixed-constructor`
 (junk below a fixed constructor), `3-two-branches-constructor-terms` (two
 failing goals, constructor-typed inner terms), `4-nested-rounds` (a second
-round finds a deeper absent row), `5-hand-off` (before reporting a tell, match
+round finds a deeper absent row), `5-stops` (before reporting a stop, check
 it against the three there). With the invocation keyword `verbose`, read
 examples 0 and 2 before the first walk. `fixtures/MANIFEST.md` says how each
 example's model was produced.
