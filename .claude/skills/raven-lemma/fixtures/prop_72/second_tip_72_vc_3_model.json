@@ -1,0 +1,81 @@
+{
+  "Elem": ["Elem!0"],
+  "List": ["List!8", "List!6", "List!4", "List!3", "List!7", "Nil", "List!1", "List!2", "List!5"],
+  "Nat": ["Nat!5", "Nat!1", "Nat!3", "Nat!2", "Z", "Nat!4"],
+  "xs": "List!4",
+  "i": "Nat!2",
+  "i_min": "Nat!1",
+  "t": "List!1",
+  "h": "Elem!0",
+  "app": {
+    "(Nil, List!8)": "List!8",
+    "(Nil, List!6)": "List!6",
+    "(Nil, List!4)": "List!4",
+    "(Nil, List!3)": "List!3",
+    "(Nil, List!7)": "List!7",
+    "(Nil, Nil)": "Nil",
+    "(Nil, List!1)": "List!1",
+    "(Nil, List!2)": "List!2",
+    "(Nil, List!5)": "List!5",
+    "(List!2, List!3)": "List!7"
+  },
+  "drop": {
+    "(Nat!5, Nil)": "Nil",
+    "(Nat!1, List!1)": "List!6",
+    "(Nat!2, List!4)": "List!6",
+    "(Nat!2, Nil)": "Nil",
+    "(Z, List!8)": "List!8",
+    "(Z, List!6)": "List!6",
+    "(Z, List!4)": "List!4",
+    "(Z, List!3)": "List!3",
+    "(Z, List!7)": "List!7",
+    "(Z, Nil)": "Nil",
+    "(Z, List!1)": "List!1",
+    "(Z, List!2)": "List!2",
+    "(Z, List!5)": "List!5"
+  },
+  "len": {
+    "List!4": "Nat!5",
+    "Nil": "Z",
+    "List!1": "Nat!3"
+  },
+  "rev": {
+    "List!6": "List!5",
+    "List!4": "List!7",
+    "Nil": "Nil",
+    "List!1": "List!2"
+  },
+  "sub": {
+    "(Nat!5, Nat!2)": "Nat!4",
+    "(Nat!3, Nat!1)": "Nat!4",
+    "(Z, Nat!5)": "Z",
+    "(Z, Nat!1)": "Z",
+    "(Z, Nat!3)": "Z",
+    "(Z, Nat!2)": "Z",
+    "(Z, Z)": "Z",
+    "(Z, Nat!4)": "Z"
+  },
+  "take": {
+    "(Nat!5, Nil)": "Nil",
+    "(Nat!2, Nil)": "Nil",
+    "(Z, List!8)": "Nil",
+    "(Z, List!6)": "Nil",
+    "(Z, List!4)": "Nil",
+    "(Z, List!3)": "Nil",
+    "(Z, List!7)": "Nil",
+    "(Z, Nil)": "Nil",
+    "(Z, List!1)": "Nil",
+    "(Z, List!2)": "Nil",
+    "(Z, List!5)": "Nil",
+    "(Nat!4, List!7)": "List!8",
+    "(Nat!4, List!2)": "List!5"
+  },
+  "Cons": {
+    "(Elem!0, Nil)": "List!3",
+    "(Elem!0, List!1)": "List!4"
+  },
+  "S": {
+    "Nat!1": "Nat!2",
+    "Nat!3": "Nat!5"
+  }
+}

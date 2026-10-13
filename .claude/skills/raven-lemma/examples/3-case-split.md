@@ -1,123 +1,33 @@
-# Example 3 — Case split: empty frontier, goal stuck on a bare input variable
+# Example 3 — case split: the tag is a variable of the proof
 
-The intake state: the instantiate procedure found NOTHING to add — the
-frontier was empty from the very first round — and the proof fails. The
-missing piece is not a term and not a lemma: it is proof STRUCTURE, a
-case split on the shapeless input that blocks every unfolding.
+prop_63, `implies(lt(n, len(xs)), last(drop(n, xs)) == last(xs))`, induction
+on `n`, case split on `xs`. `tip_63_vc_3`, branch `n = S(n_min), xs = Cons(_h, t)`:
+`STOP at last(Cons(_h, t)): t is a variable the branch does not fix.`
 
-## Broken proof
+```json
+"t": "NList!1", "Cons": { "(Nat!2, NList!1)": "NList!2" },
+"drop": { "(Nat!6, NList!2)": "NList!3", "(Nat!1, NList!1)": "NList!3" },
+"last": { "NList!3": "Nat!4", "NList!2": "Nat!7", "NList!1": "Nat!4" }
+```
 
-`tip_seven` (`sub(add(n, m), n) == m`), failing in its `n = Z` branch:
+`drop(n, xs) = drop(n', t)` fired; the IH `last(drop(n', t)) == last(t)`
+holds (`Nat!4`); `last(Cons(_h, t)) = Nat!7` is junk because `last` matches
+on the tail and `t` is the output of no `Cons` row.
+
+IH present; no guard. The tag at the matching position is `t`, **a pattern
+variable of the proof** — not a function result (example 4). Nothing to
+state; the proof has not looked at `t`.
 
 ```rust
-fn tip_seven(n: Nat, m: Nat) {
-    match n {
-        Nat::Z => (),
-        Nat::S(n_prime) => {
-            instantiate!(Nat::S(add(n_prime, m)));
-            tip_seven(*n_prime, m);
-        }
-    }
-}
+NList::Cons(_h, t) => match *t.clone() {
+    NList::Nil => (),                              // lt(n', len(Nil)) = false
+    NList::Cons(_h2, _t2) => { tip_63(*n_min, *t); }
+},
 ```
 
-```
-$ cargo test --test prop_07_case_gap
-## > Failed to verify 'tip_seven_vc_1': solver found counterexamples.
-```
+Two goals replace one: the `Nil` arm closes by the hypothesis being false,
+the `Cons` arm by `last` firing to `last(t)` and the IH. Green. Report: case
+split on `t` in the `S`/`Cons` arm — no helper — depth 0.
 
-## Counterexample
-
-```smt2
-; lemma  : tip_seven   [vc 1]
-; goal   : sub(add(n, m), n) == m
-; branch : n = Z
-;
-; definitions:
-;   add(Z, y)               = y
-;   add(S(x_prime), y)      = S(add(x_prime, y))
-;   sub(Z, y)               = Z
-;   sub(S(x_min), Z)        = S(x_min)
-;   sub(S(x_min), S(y_min)) = sub(x_min, y_min)
-
-(assert (= n Z))
-
-; instantiated terms:
-;   from the goal:
-;     (add n m)   (sub (add n m) n)
-
-(assert (distinct (sub (add n m) n) m))
-```
-
-Note how SMALL the ledger is: two terms. That is itself a signal.
-
-## Classify
-
-Coverage: the branch `n = Z` binds no pattern variables — vacuous.
-Saturation: immediate. The only pinned unfolding is `add(n, m)` at
-`n = Z`, whose result is the bare `m` — no new terms. `sub(add(n,m), n)`
-cannot unfold: sub matches its FIRST argument, whose class holds only
-`m` — no constructor. Frontier empty, round zero.
-
-Signature test: missing IH — no (no variables to cover). Guard — no
-guards among these definitions. Shape lemma — the blocking scrutinee is
-not an opaque application... it is **`m`, a bare INPUT variable of the
-lemma. CASE SPLIT.** The countermodel exploits `m`'s shapelessness: no
-`sub` equation applies at a shapeless argument, so `sub(add(n,m), n)`
-floats free of `m`.
-
-## Candidate
-
-Not a lemma — a structural edit: split the failing branch on `m`'s
-constructors. Each resulting arm pins `m`'s shape, which is exactly what
-every blocked equation was waiting for.
-
-## Pre-validate — the shape probe — HISTORICAL: probes are no longer performed (SKILL.md §1 "Inputs", §4 step 4); read this section as the reasoning behind the candidate, not as a step to repeat
-
-The case-split analogue of the instance probe: assert each constructor
-shape of `m` on the failed query; the split is a verified fix only if
-EVERY shape closes the VC.
-
-```smt2
-(assert (= m Nat__Z))            (check-sat)   ; -> unsat
----
-(declare-const m_prime UI_Nat)
-(assert (Nat__S_rel m_prime m))  (check-sat)   ; -> unsat
-```
-
-Both shapes `unsat`: the split is validated before any source edit.
-(Had one shape stayed `sat`, that arm would carry a genuine remaining
-gap — the split alone would not suffice.)
-
-## Construct
-
-Wrap the failing branch's body in the match (restructuring a proof-body
-branch is inside the additive envelope; note the named `_m_prime` — a
-bare `_` in a constructor pattern is forbidden):
-
-```rust
-        Nat::Z => match m {
-            Nat::Z => (),
-            Nat::S(_m_prime) => (),
-        },
-```
-
-## Compose
-
-Not needed: both new arms close definitionally (`m = Z`: everything
-collapses to `Z`; `m = S(m')`: sub's second equation fires at the now
-S-shaped first argument). If an arm had still failed, the instantiate
-procedure would run on that arm's new VC — each arm is its own VC with
-its own counterexample.
-
-## Verified
-
-```
-$ cargo test --test prop_07_case_gap
-test result: ok. 1 passed; 0 failed
-```
-
-Report: no new lemma; one case split on `m` in the `n = Z` branch, both
-arms definitional, zero hints. (The answer key `tests/prop_07.rs`
-additionally carries `instantiate!(sub(m, n))` in this branch — measured
-redundant; the split alone is the minimal fix.)
+Same stop line on `sub(len t, Z)` with `len(t)` the tag is example 4: a
+`match` on `t` would not give `len(t)` a shape. Read what the tag *is*.

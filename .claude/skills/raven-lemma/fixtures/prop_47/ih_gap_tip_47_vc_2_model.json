@@ -1,0 +1,45 @@
+{
+  "Elem": ["Elem!0"],
+  "Nat": ["Nat!4", "Nat!3", "Nat!6", "Nat!1", "Nat!7", "Nat!2", "Nat!5", "Z"],
+  "Tree": ["Tree!2", "Tree!3", "Leaf", "Tree!4", "Tree!5", "Tree!1", "Tree!6"],
+  "t": "Tree!5",
+  "e": "Elem!0",
+  "r": "Tree!1",
+  "l": "Tree!2",
+  "height": {
+    "Tree!2": "Nat!4",
+    "Tree!3": "Nat!2",
+    "Leaf": "Z",
+    "Tree!4": "Nat!4",
+    "Tree!5": "Nat!1",
+    "Tree!1": "Nat!5",
+    "Tree!6": "Nat!7"
+  },
+  "max": {
+    "(Nat!4, Nat!5)": "Nat!6",
+    "(Nat!2, Nat!4)": "Nat!3",
+    "(Nat!5, Nat!4)": "Nat!6",
+    "(Z, Nat!4)": "Nat!4",
+    "(Z, Nat!3)": "Nat!3",
+    "(Z, Nat!6)": "Nat!6",
+    "(Z, Nat!1)": "Nat!1",
+    "(Z, Nat!7)": "Nat!7",
+    "(Z, Nat!2)": "Nat!2",
+    "(Z, Nat!5)": "Nat!5",
+    "(Z, Z)": "Z"
+  },
+  "mirror": {
+    "Tree!2": "Tree!4",
+    "Leaf": "Leaf",
+    "Tree!5": "Tree!6",
+    "Tree!1": "Tree!3"
+  },
+  "S": {
+    "Nat!3": "Nat!7",
+    "Nat!6": "Nat!1"
+  },
+  "Node": {
+    "(Tree!2, Elem!0, Tree!1)": "Tree!5",
+    "(Tree!3, Elem!0, Tree!4)": "Tree!6"
+  }
+}

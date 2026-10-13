@@ -1,9 +1,9 @@
 // TIP IsaPlanner prop_47: height(mirror(t)) == height(t)
 //
-// Lemma-gap fixture: the helper lemma is present and called, the left
-// induction hypothesis is present, and the instantiate procedure has run
-// to saturation (the third hint is its work). The verification still
-// fails. The missing piece is a recursive call.
+// Fixture for the lemma skill's missing-IH example: the helper lemma is
+// present and called, the left induction hypothesis is present, and every
+// equation fires in the countermodel. The verification still fails; the
+// missing piece is the recursive call on `r`.
 #[ravencheck::module]
 mod tip_benchmarks {
 

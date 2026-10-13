@@ -1,0 +1,26 @@
+{
+  "NList": ["Nil", "NList!0", "NList!1"],
+  "Nat": ["Nat!1", "Nat!3", "Nat!2", "Z"],
+  "n": "Nat!1",
+  "xs": "NList!0",
+  "count": {
+    "(Nat!1, Nil)": "Z",
+    "(Nat!1, NList!0)": "Nat!2",
+    "(Nat!1, NList!1)": "Nat!2",
+    "(Nat!3, Nil)": "Z",
+    "(Nat!2, Nil)": "Z",
+    "(Z, Nil)": "Z"
+  },
+  "eq_nat": {
+    "(Nat!1, Nat!1)": "false",
+    "(Nat!3, Z)": "false",
+    "(Z, Nat!3)": "false",
+    "(Z, Z)": "true"
+  },
+  "Cons": {
+    "(Nat!1, NList!0)": "NList!1"
+  },
+  "S": {
+    "Nat!2": "Nat!3"
+  }
+}

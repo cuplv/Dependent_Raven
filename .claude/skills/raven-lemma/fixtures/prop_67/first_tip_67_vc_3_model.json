@@ -1,0 +1,44 @@
+{
+  "Elem": ["Elem!1", "Elem!0"],
+  "List": ["List!4", "List!3", "Nil", "List!1", "List!2", "List!5"],
+  "Nat": ["Nat!5", "Nat!1", "Nat!6", "Nat!3", "Nat!2", "Z", "Nat!4"],
+  "xs": "List!4",
+  "_h": "Elem!0",
+  "t": "List!1",
+  "_h2": "Elem!1",
+  "_t2": "List!2",
+  "butlast": {
+    "List!4": "List!5",
+    "Nil": "Nil",
+    "List!1": "List!3"
+  },
+  "len": {
+    "List!4": "Nat!5",
+    "List!3": "Nat!1",
+    "Nil": "Z",
+    "List!1": "Nat!3",
+    "List!5": "Nat!4"
+  },
+  "sub": {
+    "(Nat!5, Nat!2)": "Nat!6",
+    "(Nat!3, Nat!2)": "Nat!1",
+    "(Nat!3, Z)": "Nat!6",
+    "(Z, Nat!5)": "Z",
+    "(Z, Nat!1)": "Z",
+    "(Z, Nat!6)": "Z",
+    "(Z, Nat!3)": "Z",
+    "(Z, Nat!2)": "Z",
+    "(Z, Z)": "Z",
+    "(Z, Nat!4)": "Z"
+  },
+  "Cons": {
+    "(Elem!1, List!2)": "List!1",
+    "(Elem!0, List!3)": "List!5",
+    "(Elem!0, List!1)": "List!4"
+  },
+  "S": {
+    "Nat!1": "Nat!4",
+    "Nat!3": "Nat!5",
+    "Z": "Nat!2"
+  }
+}

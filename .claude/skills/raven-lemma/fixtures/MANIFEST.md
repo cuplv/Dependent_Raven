@@ -1,27 +1,26 @@
-# Fixture manifest (raven-lemma)
+# Fixture manifest
 
-Lemma-gap fixtures: proofs whose instantiate procedure has been run to
-saturation and which still fail — the gap is a fact (helper lemma, case
-split, or recursive call), never a missing switch. Each fixture is the
-INTAKE state: hints the instantiate procedure would have added are
-already in the body. To run one: copy into `test_suite/tests/`, run
-`cargo test --test <name>` from `test_suite/`; artifacts land in
-`test_suite/logs/`. The verified originals in `test_suite/tests/` are
-the answer keys.
+The models behind `examples/`, verbatim as the verifier wrote them
+(`test_suite/logs/<lemma>_vc_<k>_model.json`, z3 5.1.0 in process). One
+directory per benchmark; the prefix says the round (`first_` = the naive
+attempt, `second_` = after one fix).
 
-| Fixture | Source | Gap (signature) | Failing VC | Fix |
+To regenerate: copy the committed `test_suite/tests/<prop>.rs` to a temporary
+name in the same directory, remove what the "Removed" column names (nothing
+else), run `cargo test -p test_suite --test <temp>`, take the model file
+from `test_suite/logs/`, delete the copy. Log files are keyed by lemma name,
+so run one fixture at a time. Tag names (`Nat!4`) differ between runs; only
+the rows relating them are stable.
+
+| Fixture | Source | Removed | Failing goal | Example |
 |---|---|---|---|---|
-| `prop_04_lemma_gap.rs` | `prop_04.rs` | guard lemma | `tip_04_vc_3` | add `eq_refl` (`Lemma(eq_nat(x, x))`) + call `eq_refl(n)`; the manual guard hint then becomes redundant |
-| `prop_47_lemma_gap.rs` | `prop_47.rs` | algebraic lemma | `tip_47_vc_16` | add `max_comm` (`Lemma(max(a,b) == max(b,a))`) + call `max_comm(height(*l), height(*r))`; the helper's own proof needs its two wrapped-max hints (composition); the saturation-era swapped-max hint in the target then becomes redundant |
-| `prop_07_case_gap.rs` | `prop_07.rs` | case split | `tip_seven_vc_1` | wrap the `n = Z` branch body in `match m { Z => (), S(_m_prime) => () }`; no lemma, no hints (the answer key's `instantiate!(sub(m, n))` is measured redundant) |
-| `prop_47_ih_gap.rs` | `prop_47.rs` | missing recursive call | `tip_47_vc_19` | add `tip_47(*r.clone())` (descent: `r ⊏ t` via `Node(l, e, r)`); the saturation-era swapped-max hint then becomes redundant |
-| `prop_69_shape_gap.rs` | `prop_69.rs` | shape lemma | `tip_69_vc_4` | add `add_succ_r` (`Lemma(add(x, S(y)) == S(add(x, y)))`) + call `add_succ_r(m.clone(), *n_min.clone())`; the bare helper verifies (the answer key's internal hint is measured redundant) |
-| `prop_78_chain_gap.rs` | `prop_78.rs` | conditional preservation lemma (depth chain) | `tip_78_vc_6` | add `sorted_insort` (`Lemma(implies(sorted(xs), sorted(insort(x, xs))))`, depth 1; calls the already-proven `le_neg` at depth 0) + call `sorted_insort(h.clone(), sort(*t.clone()))`; the saturation-era `insort(h, sort(t))` hint then becomes redundant |
+| `prop_59/first_…` | `tests/prop_59.rs` | helper `app_nil`; the main body replaced by induction on `xs` with the IH call | `tip_59_vc_2` | 1A |
+| `prop_53/first_…` | `tests/prop_53.rs` | helper `count_insort` and the guard hint; main body = induction on `xs` | `tip_53_vc_2` | 1B |
+| `prop_04/first_…`, `prop_04/second_guard_hinted_…` | `tests/prop_04.rs` | helper `eq_refl`; the second model has `instantiate!(eq_nat(n, n))` added instead | `tip_04_vc_1` | 2 |
+| `prop_63/first_…` | `tests/prop_63.rs` | the case split on `t` | `tip_63_vc_3` | 3 |
+| `prop_67/first_…` | `tests/prop_67.rs` | helper `sub_zero` | `tip_67_vc_3` | 4 |
+| `prop_72/second_…` | `tests/prop_72.rs` | all helpers; main body = induction on `i`, case on `xs`, plus the one hint `app(rev(t), Cons(h, Nil))` the instantiate skill adds first | `tip_72_vc_3` | 5 |
+| `prop_47/ih_gap_…` + `prop_47_ih_gap.rs` | the `.rs` in this directory (prop_47 with the IH on `r` removed) | run as is | `tip_47_vc_2` | 6 |
 
-Captured artifacts per fixture: `<prop>_counterexample.smt2` (the intake
-counterexample — for prop_04 it shows the guard PRESENT in user hints
-with the proof failing, the guard-signature evidence) and
-`<prop>_failed_query.smt2` (the raw query, kept for reference; the skill
-reads it but never probes it).
-
-All six planned fixtures are present.
+The full round-by-round captures live outside the skill in
+`doc/skill_fixtures/`, with a README classifying every failure.

@@ -1,0 +1,28 @@
+{
+  "NList": ["Nil", "NList!3", "NList!2", "NList!4", "NList!1"],
+  "Nat": ["Nat!4", "Z", "Nat!3", "Nat!2", "Nat!1"],
+  "ys": "Nil",
+  "xs": "NList!2",
+  "_h": "Nat!1",
+  "t": "NList!1",
+  "app": {
+    "(Nil, Nil)": "Nil",
+    "(Nil, NList!3)": "NList!3",
+    "(Nil, NList!2)": "NList!2",
+    "(Nil, NList!4)": "NList!4",
+    "(Nil, NList!1)": "NList!1",
+    "(NList!2, Nil)": "NList!4",
+    "(NList!1, Nil)": "NList!3"
+  },
+  "last": {
+    "Nil": "Z",
+    "NList!3": "Nat!2",
+    "NList!2": "Nat!4",
+    "NList!4": "Nat!3",
+    "NList!1": "Nat!2"
+  },
+  "Cons": {
+    "(Nat!1, NList!3)": "NList!4",
+    "(Nat!1, NList!1)": "NList!2"
+  }
+}
