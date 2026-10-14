@@ -286,7 +286,12 @@ pub fn synthesize_expr(
             
             // [ENG] 2. Following CEGQI, we collect instantiation axioms into a scoped list
             //          instead of binding them to the local path condition.
-            env.add_instantiation(*inner.clone());
+            //          RAVENCHECK_STRIP_HINTS drops every user hint at this point (the
+            //          term is still type-checked): the acceptance mode for the
+            //          frontier engine, which must then re-derive them.
+            if std::env::var("RAVENCHECK_STRIP_HINTS").is_err() {
+                env.add_instantiation(*inner.clone());
+            }
             
             // [ENG] 3. Return Unit type as it acts purely as a logical hint for the backend.
             Type::Base(BaseType::Unit)
