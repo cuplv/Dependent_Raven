@@ -253,12 +253,6 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 stop = Some(crate::frontier::Stop::Saturated { stuck: round.stuck });
                 break (verdict, model);
             }
-            if frontier_cfg.trace {
-                println!("  🔁 frontier round {}: +{} term(s)", rounds.len() + 1, round.added.len());
-                for t in &round.added {
-                    println!("       instantiate!({});", crate::frontier::render(t));
-                }
-            }
             for cand in &round.added {
                 src.instantiations.push(cand.clone());
                 goal.instantiations.push(relabs_hint(&program, cand));
@@ -316,8 +310,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 }
                 println!("{}", json);
             }
-            // [ENG] What the frontier did before giving up, if it ran.
-            if let Some(stop) = &stop {
+            // [ENG] What the frontier did before giving up, if it ran (trace only).
+            if let (true, Some(stop)) = (frontier_cfg.trace, &stop) {
                 cex_line.push_str(&crate::frontier::stop_report(stop, &rounds));
             }
             failures.push(if verdict == Verdict::Sat {
@@ -344,7 +338,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
                 goal_name
             );
-            if !rounds.is_empty() {
+            if frontier_cfg.trace && !rounds.is_empty() {
                 print!("{}", crate::frontier::verified_report(&rounds, source_goal.as_ref()));
             }
         }
