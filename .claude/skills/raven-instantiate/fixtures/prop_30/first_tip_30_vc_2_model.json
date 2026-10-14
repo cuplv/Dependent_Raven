@@ -1,0 +1,35 @@
+{
+  "NList": ["NList!0", "NList!3", "Nil", "NList!2", "NList!4", "NList!1"],
+  "Nat": ["Z", "Nat!2", "Nat!1"],
+  "x": "Nat!1",
+  "xs": "NList!3",
+  "t": "NList!0",
+  "h": "Nat!2",
+  "elem": {
+    "(Z, Nil)": "false",
+    "(Nat!2, Nil)": "false",
+    "(Nat!1, Nil)": "false",
+    "(Nat!1, NList!2)": "false",
+    "(Nat!1, NList!4)": "true",
+    "(Nat!1, NList!1)": "true"
+  },
+  "eq_nat": {
+    "(Z, Z)": "true",
+    "(Nat!1, Nat!1)": "true"
+  },
+  "ins": {
+    "(Nat!1, NList!0)": "NList!1",
+    "(Nat!1, NList!3)": "NList!2"
+  },
+  "lt": {
+    "(Z, Z)": "false",
+    "(Nat!2, Z)": "false",
+    "(Nat!1, Z)": "false",
+    "(Nat!1, Nat!2)": "false"
+  },
+  "Cons": {
+    "(Nat!2, NList!0)": "NList!3",
+    "(Nat!2, NList!1)": "NList!2",
+    "(Nat!1, NList!3)": "NList!4"
+  }
+}

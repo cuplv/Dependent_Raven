@@ -1,7 +1,8 @@
 # Example 2 — guard that must hold: naming it only lets the solver choose
 
-prop_04, `S(count(n, xs)) == count(n, Cons(n, xs))`, empty body. Stop line:
-`STOP at guard eq_nat(n, n): only one value closes, on a variable the branch does not fix.`
+prop_04, `S(count(n, xs)) == count(n, Cons(n, xs))`, empty body. Instantiate
+skill: STOP, goal term `count(n, Cons(n, xs))`, stuck at the guard
+`eq_nat(n, n)`, which must be `true` on a variable the branch does not fix.
 
 ```json
 "n": "Nat!1", "S": { "Nat!2": "Nat!3" },

@@ -4,7 +4,7 @@ Skeletons taken from verified proofs in `test_suite/tests/`. Pick by the
 shape of the statement; fill in the self-calls. Each already satisfies
 descent (self-calls on pattern-bound strict subterms) and acyclicity.
 Templates ship bare: if the helper's own goal fails, the instantiate skill
-runs on it (SKILL.md §3 step 4), never a hint written here.
+runs on it (SKILL.md §5 step 5), never a hint written here.
 
 **A. One inductive argument** — reflexivity, right identities
 (`eq_refl`, `add_zero`, `sub_zero`):

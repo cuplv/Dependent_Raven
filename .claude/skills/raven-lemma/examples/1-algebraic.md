@@ -2,8 +2,9 @@
 
 ## A. prop_59 — `implies(ys == Nil, last(app(xs, ys)) == last(xs))`
 
-Naive proof: induction on `xs`, IH call. Stop line:
-`STOP at app(t, Nil): t is a variable the branch does not fix.`
+Naive proof: induction on `xs`, IH call. Instantiate skill: STOP, goal term
+`last(app(xs, Nil))`, stuck at `app(t, Nil)` with `t` a variable the branch
+does not fix.
 
 ```json
 "t": "NList!1", "Cons": { "(Nat!1, NList!1)": "NList!2" },
@@ -37,7 +38,7 @@ fn count_insort(n: Nat, x: Nat, s: NList) { match s { NList::Nil => (), NList::C
 // target, Cons arm: count_insort(n, h, sort(t)); tip_53(n, t);
 ```
 
-Re-run: `count_insort_vc_2` and `tip_53_vc_2` fail. §3 step 4: the
+Re-run: `count_insort_vc_2` and `tip_53_vc_2` fail. §5 step 5: the
 instantiate skill on the helper adds `le(x, h)`, `eq_nat(n, h)`,
 `eq_nat(n, x)`, then `count(n, s)`, then `count(n, t)`; on the target,
 `eq_nat(n, h)`. Green. Report: `count_insort` — algebraic — at

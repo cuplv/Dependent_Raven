@@ -32,8 +32,8 @@ fn tip_59(xs: NList, ys: NList) {
 | `app(t, Nil)` = `(NList!1, Nil)` | yes → `NList!3`, junk | `t` is the output of **no** `Cons` row and the branch does not fix it: no equation of `app` applies | **stop** |
 
 `t` is a tag, so no equation of `app` applies at `app(t, Nil)`, and no term can
-be named that makes one apply. Report:
-`STOP at app(t, Nil): t is a variable the branch does not fix.`
+be named that makes one apply. Report STOP: goal term `last(app(xs, Nil))`,
+stuck at `app(t, Nil)` with `t` a variable the branch does not fix.
 
 ## B. A function matching on a variable that is a tag (prop_63)
 
@@ -68,8 +68,8 @@ fn tip_63(n: Nat, xs: NList) {
 | `last(xs)` = `last(Cons(_h, t))` | yes → `Nat!7` | `last(Cons(h, t))` matches on `t`; `t` is the output of no `Cons` row and the branch does not fix it | **stop** |
 
 The next equation needs the shape of `t`, and a hint can only name terms, not
-give a variable a constructor. Report:
-`STOP at last(Cons(_h, t)): t is a variable the branch does not fix.`
+give a variable a constructor. Report STOP: goal term `last(xs)`, stuck at
+`last(Cons(_h, t))` with `t` a variable the branch does not fix.
 
 ## C. A guard with only one closing value (prop_29)
 
@@ -100,17 +100,19 @@ fn tip_29(x: Nat, xs: NList) {
 | guard `eq_nat(x, x)` = `(Nat!1, Nat!1)` | **no** | looks like a guard candidate — but only the value `true` closes the goal (`false` gives `elem(x, Nil) = false`, the model's refutation), and `x` is a tag the branch does not fix | **stop** |
 
 Naming `eq_nat(x, x)` would give it a row, and the solver would choose `false`.
-Report: `STOP at guard eq_nat(x, x): only one value closes, on a variable the
-branch does not fix.` Compare the `Cons` arm of the same lemma, where
-`eq_nat(x, _h)` is a plain guard candidate because either value closes
-(example 1).
+Report STOP: goal term `elem(x, ins1(x, Nil))`, stuck at the guard
+`eq_nat(x, x)`, which must be `true` on a variable the branch does not fix.
+Compare the `Cons` arm of the same lemma, where `eq_nat(x, _h)` is a plain
+guard candidate because either value closes (example 1).
 
-## The two stop conditions
+## The stop conditions
 
 - the next equation needs a variable the branch does not fix (A and B: a tag
   with no constructor row at the point the equation matches);
 - the guard has no row and only one of its values closes the goal, on such a
-  variable (C).
+  variable (C);
+- the candidates grow: each round's term is the previous round's under one
+  more constructor, so no finite set of hints can close the goal.
 
 Everything else — which fact or case split the stop calls for — is the lemma
 skill's reading of the same model.

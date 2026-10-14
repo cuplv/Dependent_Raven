@@ -1,8 +1,9 @@
 # Example 3 — case split: the tag is a variable of the proof
 
 prop_63, `implies(lt(n, len(xs)), last(drop(n, xs)) == last(xs))`, induction
-on `n`, case split on `xs`. `tip_63_vc_3`, branch `n = S(n_min), xs = Cons(_h, t)`:
-`STOP at last(Cons(_h, t)): t is a variable the branch does not fix.`
+on `n`, case split on `xs`. `tip_63_vc_3`, branch `n = S(n_min), xs = Cons(_h, t)`.
+Instantiate skill: STOP, goal term `last(xs)`, stuck at `last(Cons(_h, t))`
+with `t` a variable the branch does not fix.
 
 ```json
 "t": "NList!1", "Cons": { "(Nat!2, NList!1)": "NList!2" },
@@ -29,5 +30,5 @@ Two goals replace one: the `Nil` arm closes by the hypothesis being false,
 the `Cons` arm by `last` firing to `last(t)` and the IH. Green. Report: case
 split on `t` in the `S`/`Cons` arm — no helper — depth 0.
 
-Same stop line on `sub(len t, Z)` with `len(t)` the tag is example 4: a
+The same stop on `sub(len t, Z)` with `len(t)` the tag is example 4: a
 `match` on `t` would not give `len(t)` a shape. Read what the tag *is*.

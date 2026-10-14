@@ -4,8 +4,11 @@ description: Repair a failed ravencheck proof by adding missing instantiate!
   hints, read off the countermodel the verifier writes for each failing goal
   (test_suite/logs/<goal>_model.json) against the source program. Use when a
   test_suite proof fails with "solver found counterexamples". Adds hints only;
-  when the model shows the failure is not a missing hint, reports where the
-  walk stopped and why, for the lemma skill to classify.
+  when the model shows the failure is not a missing hint, reports STOP with
+  the stuck term and the application no hint can close, the evidence that a
+  lemma is needed. This is the instantiation stage of
+  raven-lemma, which owns the handoff to lemmas; invoked directly, it stands
+  alone and finishes with the same report.
 ---
 
 # raven-instantiate
@@ -73,6 +76,7 @@ Details: `reference/model-format.md` (open only if a row is ambiguous).
 | an inner term of the selected equation has no row (`app(t2, [x])` under `t = Cons(_h2, t2)`; `take_a(n', t)`; a constructor term such as `P(h, h2)` when the whole `P` table is absent) | **inner term** | hint it |
 | the `if`'s guard has no row and *either* value closes the arm (one outcome by the goal or a hypothesis, the other by the IH) | **guard** | hint it |
 | the next equation needs a variable the branch does not fix (`app(t, Nil)` or `last(Cons(_h, t))` with `t` the output of no `Cons` row), or the guard has no row and only *one* value closes the goal on such a variable (`eq_nat(x, x)` must be true) — naming the term would only let the solver pick the value | **stop** | no hint; report where and why (§8) |
+| the round's candidate is the previous round's candidate under one more constructor (`f(S(a))`, then `f(S(S(a)))`, …): the definition recurses non-structurally and no finite set of hints closes the goal | **stop** (loop) | no further hint; report the growing term (§8) |
 
 On a stop: add no hint for that goal, finish the other goals' candidates, and
 report. Which lemma or case split the stop calls for is the lemma skill's
@@ -110,20 +114,20 @@ level, `add(Z, x)`, is a universal row).
 
 ## 8. Report
 
-Green: the hints added, by round and branch. A stop: one line per goal —
-`STOP at <application or guard>: <why>` (a variable the branch does not fix,
-or a guard with only one closing value) — with no edit made for it. No rows,
-no classification: the model file holds the evidence and the lemma skill
-reads it.
+Exactly one verdict. **DISCHARGED**: every goal green, the hints added by
+round and branch. **STOP**: instantiation cannot close it — for each goal
+still red, the stuck goal term and the application no hint can close, the
+evidence that a lemma is needed; no edit made for it, hints that were
+independently useful stay. No classification: which lemma or case split it
+calls for is the lemma skill's reading of the same model.
 
 ## 9. What to open, and when
 
 Nothing by default. `reference/model-format.md` if a row is ambiguous. One
 example when its situation arises: `0-the-walk` (unsure how to start),
-`1-two-guards` (several guards in one arm), `2-inner-term-fixed-constructor`
-(junk below a fixed constructor), `3-two-branches-constructor-terms` (two
-failing goals, constructor-typed inner terms), `4-nested-rounds` (a second
-round finds a deeper absent row), `5-stops` (before reporting a stop, check
-it against the three there). With the invocation keyword `verbose`, read
-examples 0 and 2 before the first walk. `fixtures/MANIFEST.md` says how each
-example's model was produced.
+`1-guards` (guards in one arm: several at once, or one below a guard that
+already fired), `4-nested-rounds` (a second round finds a deeper absent
+row), `5-stops` (before reporting a stop, check it against the three there).
+With the invocation keyword `verbose`, read examples 0 and 1 before the
+first walk. `fixtures/MANIFEST.md` says how each example's model was
+produced.

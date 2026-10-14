@@ -1,8 +1,9 @@
 # Classification — naming the gap from the model
 
 Inputs: the source, the goal's `test_suite/logs/<lemma>_vc_<k>_model.json`,
-and the instantiate skill's stop line `STOP at <application or guard>: <why>`
-(or a goal that is still `sat` after its hints). Read the model as the
+and the instantiate skill's STOP report — the stuck goal term and the
+application no hint can close (or a goal that is still `sat` after its
+hints). Read the model as the
 instantiate skill does (`../../raven-instantiate/SKILL.md` §3): a row is a
 defined application, an absent row an undefined one, an element with no
 constructor row a tag.
@@ -15,9 +16,9 @@ it, call it, re-run.
 | # | Signature | Evidence in the model | Fix |
 |---|---|---|---|
 | 1 | missing induction hypothesis | a pattern variable of the inductive sort, and the goal instantiated at it appears in **no** hypothesis (the IH rows for `t` are absent while the goal is about `Cons(h, t)`) | descent-checked self-call on it |
-| 2 | guard that must hold | `STOP at guard g(args)`: `g` has no row at `args`, only one value closes the goal, and `args` are variables the branch does not fix; or `g` has a row with the wrong value after a hint named it | lemma fixing the value: `g(x, x)` or `hyp ⟹ ¬g(x, y)`, minimal generalization |
-| 3a | case split | `STOP at f(…, v)` where the needed shape belongs to `v`, a **goal or pattern variable** with no constructor row | wrap the arm's body in `match v` |
-| 3b | shape lemma | `STOP at f(…, g(…))` where the tag is the **result of an application** `g(…)` whose definition cannot fire | an equation giving `g(…)` a constructor form (`sub(n, Z) == n`); if one split suffices, `match g(…)` with a computed scrutinee instead |
+| 2 | guard that must hold | the stuck application is a guard `g(args)`: `g` has no row at `args`, only one value closes the goal, and `args` are variables the branch does not fix; or `g` has a row with the wrong value after a hint named it | lemma fixing the value: `g(x, x)` or `hyp ⟹ ¬g(x, y)`, minimal generalization |
+| 3a | case split | the stuck application is `f(…, v)` where the needed shape belongs to `v`, a **goal or pattern variable** with no constructor row | wrap the arm's body in `match v` |
+| 3b | shape lemma | the stuck application is `f(…, g(…))` where the tag is the **result of an application** `g(…)` whose definition cannot fire | an equation giving `g(…)` a constructor form (`sub(n, Z) == n`); if one split suffices, `match g(…)` with a computed scrutinee instead |
 | 4 | algebraic | two elements the goal equates differ, the chain is stuck at a tag, and nothing names the equality (`app(t, Nil) = NList!3 ≠ t`; `S(max(B, A))` vs `S(max(A, B))`) | the equation between the two endpoints, fresh variables at the disagreeing positions |
 | 5 | conditional | the fact needed holds only under a hypothesis already in context: `P(a)` known and `P(f(x, a))` wanted (`sorted(insort(x, xs))`), or an equation valid under a side condition (`take(k, app(ys, zs)) == take(k, ys)` under `le(k, len ys)`) | `hyp ⟹ fact`, called at the instance; the side condition may need its own lemma |
 | — | hand back | the stuck application sits inside a **hypothesis** and its inner term has no row (`len_a(xs) = Z` with `xs = ACons(_h, t)` and `len_a(t)` absent) | not a lemma: an `instantiate!` of the inner term; return the goal to the instantiate skill |
@@ -28,7 +29,7 @@ it, call it, re-run.
 the one that makes the others look like lemmas. The test is presence of the
 *instantiated goal* among the hypotheses, not whether the variable is
 mentioned somewhere — a helper's postcondition may mention `t` without being
-the IH. The self-call obeys the descent rule (SKILL.md §1); write the descent
+the IH. The self-call obeys the descent rule (SKILL.md §3); write the descent
 line in the report.
 
 **2. Guard that must hold.** The instantiate skill stops here when it sees
@@ -51,7 +52,7 @@ a `match` on the computed scrutinee in the proof body is the cheaper fix.
 stuck; the two stuck endpoints are the candidate's two sides. Put a fresh
 variable at every position where they differ and nowhere else. The goal
 itself, generalized, always "closes" the goal and is excluded by acyclicity
-(SKILL.md §1); anti-unify the endpoints, not the goal.
+(SKILL.md §3); anti-unify the endpoints, not the goal.
 
 **5. Conditional.** The signature of sorting- and length-indexed proofs. The
 antecedent is the hypothesis that supports the fact at the instance
@@ -73,5 +74,5 @@ fails is classified again from the top: fixing one gap can surface the next
 (a missing IH and an algebraic lemma can both be absent, and neither fix
 alone turns the goal green). No signature matching, or two constructed
 candidates leaving the goal red with the same model shape, is a stop
-(SKILL.md §5) — report the evidence and the tried candidates; never conclude
+(SKILL.md §7) — report the evidence and the tried candidates; never conclude
 "unprovable".

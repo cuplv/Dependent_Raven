@@ -26,6 +26,6 @@ function is never registered.
 Do not predict fragment membership; add the helper and run. A violation
 fails fast and loud (the sort-cycle error, or a panic on an unsupported
 form). Then: retract the helper, apply the matching move, retry **once**.
-If the retry fails too, stop (SKILL.md §5) and report the fact in math
+If the retry fails too, stop (SKILL.md §7) and report the fact in math
 notation, each formulation tried, and the exact error each produced — the
 attempt list says which direction of expressiveness the proof wanted.

@@ -1,8 +1,9 @@
 # Example 4 — shape lemma: the tag is an application's result
 
 prop_67, `len(butlast(xs)) == sub(len(xs), S(Z))`, induction on `xs`, case
-split on `t`. `tip_67_vc_3`, branch `xs = Cons(_h, t), t = Cons(_h2, _t2)`:
-`STOP at sub(len(t2), Z): len(t2) is an application whose shape no branch fixes.`
+split on `t`. `tip_67_vc_3`, branch `xs = Cons(_h, t), t = Cons(_h2, _t2)`.
+Instantiate skill: STOP, goal term `sub(len(xs), S(Z))`, stuck at
+`sub(len(t2), Z)` with `len(t2)` an application whose shape no branch fixes.
 
 ```json
 "t": "List!1", "S": { "Nat!1": "Nat!4", "Nat!3": "Nat!5", "Z": "Nat!2" },

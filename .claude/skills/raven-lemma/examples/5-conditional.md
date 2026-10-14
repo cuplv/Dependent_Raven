@@ -2,8 +2,10 @@
 
 prop_72, `rev(drop(i, xs)) == take(sub(len(xs), i), rev(xs))`, induction on
 `i`, case split on `xs`. `tip_72_vc_3`, branch `i = S(i_min), xs = Cons(h, t)`,
-after the instantiate skill's one hint (`app(rev(t), Cons(h, Nil))`):
-`STOP at take(sub(len(t), i_min), app(rev(t), Cons(h, Nil))): sub(len(t), i_min) is an application whose shape no branch fixes.`
+after the instantiate skill's one hint (`app(rev(t), Cons(h, Nil))`), it
+reports STOP: goal term `take(sub(len(xs), i), rev(xs))`, stuck at
+`take(sub(len(t), i_min), app(rev(t), Cons(h, Nil)))` with `sub(len(t), i_min)`
+an application whose shape no branch fixes.
 
 ```json
 "t": "List!1", "i_min": "Nat!1",

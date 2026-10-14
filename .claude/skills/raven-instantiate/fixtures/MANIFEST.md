@@ -16,9 +16,8 @@ between runs; only the rows relating them are stable.
 | Fixture | Source | Removed | Failing goal(s) | Example |
 |---|---|---|---|---|
 | `demo_two_plus/` | `demo_two_plus.rs` (in this directory; not a suite file) | body empty | `two_plus_vc_1` | 0 |
-| `prop_71/` | `tests/prop_71.rs` | `lt(y, h)`, `eq_nat(x, h)` | `tip_71_vc_2` | 1 |
-| `prop_64/` | `tests/prop_64.rs` | `app(t2, Cons(x, Nil))` | `tip_64_vc_3` | 2 |
-| `prop_82/` | `tests/prop_82.rs` | `take_a(n_min, t)`, `Pair::P(h, h2)` | `tip_82_vc_3`, `tip_82_vc_4` | 3 |
+| `prop_71/` | `tests/prop_71.rs` | `lt(y, h)`, `eq_nat(x, h)` | `tip_71_vc_2` | 1A |
+| `prop_30/` | `tests/prop_30.rs` | `lt(x, h)`, `eq_nat(x, h)` | `tip_30_vc_2` | 1B |
 | `prop_53/` | `tests/prop_53.rs`, helper `count_insort` | `count(n, s)` (round A), then `count(n, t)` (round B); the three guard hints kept | `count_insort_vc_2`, two rounds | 4 |
 | `prop_59/` | `tests/prop_59.rs` | helper `app_nil` replaced by induction on `xs` with the IH call | `tip_59_vc_2` | 5A |
 | `prop_63/` | `tests/prop_63.rs` | the case split on `t` | `tip_63_vc_3` | 5B |
