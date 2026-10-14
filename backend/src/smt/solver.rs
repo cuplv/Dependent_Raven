@@ -2,19 +2,19 @@
 //! SMT 질의 파일 작성과 솔버 프로세스 실행을 담당하는 모듈
 //!
 //! [ENG] A goal's query is written to a file as SMT-LIB text (the replay artifact)
-//! and solved in-process by z3 through its API, with no time limit, one run per
-//! goal. When the answer is `sat`, the finite model of that same run is returned
-//! with the verdict, so the countermodel costs no second solve. z3's own
-//! `unknown`, and any error it raises (out of memory), are reported as
-//! `Unknown`.
+//! and solved in-process by z3 through its API, within a per-query time limit
+//! (`model::z3::QUERY_TIMEOUT_MS`), one run per goal. When the answer is `sat`,
+//! the finite model of that same run is returned with the verdict, so the
+//! countermodel costs no second solve. z3's own `unknown`, the time limit, and
+//! any error it raises (out of memory), are reported as `Unknown`.
 //!
 //! `RAVENCHECK_SOLVER=cvc5` keeps the earlier subprocess race (cvc5
 //! `--full-saturate-quant` against `--finite-model-find`, first definite answer
 //! wins), which yields no model.
 //! [KOR] goal의 질의를 SMT-LIB 텍스트 파일로 쓰고(재생용), z3 API로 프로세스 안에서
-//! 시간 제한 없이 한 번 풉니다. 답이 `sat`이면 그 실행의 유한 모델을 함께 돌려주므로
-//! 반례 모델에 두 번째 풀이가 들지 않습니다. z3의 `unknown`과 오류(메모리 부족)는
-//! `Unknown`으로 보고합니다.
+//! 질의당 시간 제한(`model::z3::QUERY_TIMEOUT_MS`) 안에 한 번 풉니다. 답이 `sat`이면
+//! 그 실행의 유한 모델을 함께 돌려주므로 반례 모델에 두 번째 풀이가 들지 않습니다.
+//! z3의 `unknown`, 시간 초과, 오류(메모리 부족)는 `Unknown`으로 보고합니다.
 
 use crate::model::Model;
 use easy_smt::{Context, ContextBuilder, SExpr};

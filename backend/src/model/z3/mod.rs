@@ -15,18 +15,26 @@ use z3::{with_z3_config, Config, SatResult, Solver};
 ///       spending minutes on them.
 const MAX_TUPLES_PER_RELATION: usize = 200_000;
 
-/// [ENG] Solves a query in-process with z3, with no time limit, and returns the
-///       verdict together with the model of the same run when it is `sat`.
-///       Anything that is not a definite `sat`/`unsat` -- z3's own `unknown`,
-///       or an error such as running out of memory, which the crate raises as
-///       a panic -- is reported as `Unknown`. The z3 crate (0.21) keeps one
-///       context per thread, configured for the duration of the closure; the
-///       whole solve and extraction happens inside it.
+/// [ENG] Time limit for one query. The decidability argument bounds queries
+///       whose sorts are uninterpreted; a definitional axiom with no constructor
+///       pattern on its scrutinee triggers on every term of its sort, so a large
+///       instantiation set can still blow up in E-matching. Past the limit z3
+///       answers `unknown` and the driver moves on.
+const QUERY_TIMEOUT_MS: u64 = 45_000;
+
+/// [ENG] Solves a query in-process with z3, within `QUERY_TIMEOUT_MS`, and
+///       returns the verdict together with the model of the same run when it is
+///       `sat`. Anything that is not a definite `sat`/`unsat` -- z3's own
+///       `unknown`, the time limit, or an error such as running out of memory,
+///       which the crate raises as a panic -- is reported as `Unknown`. The z3
+///       crate (0.21) keeps one context per thread, configured for the duration
+///       of the closure; the whole solve and extraction happens inside it.
 pub fn solve(query: &str) -> (Verdict, Option<Model>) {
     let query = query.to_string();
     let outcome = std::panic::catch_unwind(move || {
         let mut cfg = Config::new();
         cfg.set_model_generation(true);
+        cfg.set_timeout_msec(QUERY_TIMEOUT_MS);
         with_z3_config(&cfg, move || {
             let solver = Solver::new();
             solver.from_string(query.clone());
