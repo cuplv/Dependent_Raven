@@ -359,41 +359,8 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
             //       scripts, not definitions -- a `tip_x(..) == ()` axiom would be
             //       meaningless and its Tuple leaf panics in expr_to_smt.
             if out_type != BaseType::Unit {
-                if let Some(body_expr) = &def.body {
-                    // Extract the names and base types of all formal parameters of the function.
-                    let mut params = Vec::new();
-                    let mut curr_ty = &def.signature;
-                    while let Type::Arrow(f) = curr_ty {
-                        let base_ty = match &*f.param_type {
-                            Type::Base(b)
-                            | Type::Refined(frontend::ast::RefinedType { base: b, .. }) => {
-                                b.clone()
-                            }
-                            _ => panic!("Complex param types not supported in backend"),
-                        };
-                        params.push((f.param_name.clone(), base_ty));
-                        curr_ty = &*f.ret_type;
-                    }
-
-                    // Initialize the arguments map with the identity mapping (x -> Var(x))
-                    let mut initial_args_map = HashMap::new();
-                    let mut initial_binders = Vec::new();
-                    for (p_name, p_ty) in &params {
-                        initial_args_map.insert(p_name.clone(), Expr::Var(p_name.clone()));
-                        initial_binders.push((p_name.clone(), p_ty.clone()));
-                    }
-
-                    // Recursively flatten nested matches/ifs and generate axioms
-                    generate_axioms_from_body(
-                        body_expr,
-                        &initial_args_map,
-                        &initial_binders,
-                        &func_name,
-                        &params,
-                        &[],
-                        &mut ctx,
-                        &program,
-                    );
+                for eq in equations_of(func_name, def, &program) {
+                    assert_equation(&mut ctx, &program, &eq);
                 }
             }
         }
@@ -501,18 +468,150 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     }
 }
 
-/// Recursively traverses a function body to flatten nested `Match` expressions.
-/// When a leaf expression (no top-level `Match`) is reached, it constructs an equality axiom
-/// and passes it through the standard transformation pipeline (ANF -> NNF -> RelAbs) to be asserted in the SMT context.
-fn generate_axioms_from_body(
+/// [KOR] 함수의 가드된 정의 등식 하나: match/if 트리의 잎 하나. `args`는 둘러싼
+///       `match`들의 패턴을 대입한 매개변수(등식의 인자 패턴), `guards`는 잎까지의
+///       경로에 있는 `if` 조건(과 let-scrutinee 등식), `rhs`는 잎입니다.
+///       `assert_equation`이 solver용으로 렌더링하고, 경계(frontier) 엔진이 기호적으로
+///       매칭합니다 — "한 단계 전개"의 개념은 이 하나뿐입니다.
+/// [ENG] One guarded defining equation of a function: one leaf of its match/if
+///       tree. `args` are the parameters with the enclosing `match` patterns
+///       substituted (the equation's argument patterns), `guards` the `if`
+///       conditions (and let-scrutinee equalities) on the path to the leaf,
+///       `rhs` the leaf. `assert_equation` renders it for the solver; the
+///       frontier engine matches it symbolically — one notion of "unfold one
+///       step".
+#[derive(Debug, Clone)]
+pub struct DefEq {
+    pub func: Ident,
+    pub binders: Vec<(Ident, BaseType)>,
+    pub args: Vec<Expr>,
+    pub guards: Vec<Expr>,
+    pub rhs: Expr,
+}
+
+/// [ENG] The structured definitional equations of every bodied, value-returning
+///       function (lemmas, which return Unit, have none), in `program.functions`
+///       order.
+pub fn definitional_equations(program: &Program) -> Vec<DefEq> {
+    let mut out = Vec::new();
+    for (func_name, def) in &program.functions {
+        out.extend(equations_of(func_name, def, program));
+    }
+    out
+}
+
+/// [ENG] The equations of one function; empty for a Unit-returning or bodiless one.
+fn equations_of(func_name: &str, def: &frontend::ast::FunctionDef, program: &Program) -> Vec<DefEq> {
+    let (_, out_type) = get_fun_types(&def.signature);
+    if out_type == BaseType::Unit {
+        return Vec::new();
+    }
+    let Some(body_expr) = &def.body else {
+        return Vec::new();
+    };
+
+    // Extract the names and base types of all formal parameters of the function.
+    let mut params = Vec::new();
+    let mut curr_ty = &def.signature;
+    while let Type::Arrow(f) = curr_ty {
+        let base_ty = match &*f.param_type {
+            Type::Base(b) | Type::Refined(frontend::ast::RefinedType { base: b, .. }) => b.clone(),
+            _ => panic!("Complex param types not supported in backend"),
+        };
+        params.push((f.param_name.clone(), base_ty));
+        curr_ty = &*f.ret_type;
+    }
+
+    // Initialize the arguments map with the identity mapping (x -> Var(x))
+    let mut initial_args_map = HashMap::new();
+    let mut initial_binders = Vec::new();
+    for (p_name, p_ty) in &params {
+        initial_args_map.insert(p_name.clone(), Expr::Var(p_name.clone()));
+        initial_binders.push((p_name.clone(), p_ty.clone()));
+    }
+
+    let mut out = Vec::new();
+    collect_equations(
+        body_expr,
+        &initial_args_map,
+        &initial_binders,
+        func_name,
+        &params,
+        &[],
+        program,
+        &mut out,
+    );
+    out
+}
+
+/// [ENG] Assert one equation as `forall binders. (g1 && ... && gn) => f(args) == rhs`,
+///       passed through ANF -> NNF -> RelAbs like the main goal.
+fn assert_equation(ctx: &mut Query, program: &Program, eq: &DefEq) {
+    let lhs = Expr::Call {
+        func: eq.func.clone(),
+        args: eq.args.clone(),
+    };
+
+    // Form the equation: LHS == RHS (where RHS is the leaf expression)
+    let eq_expr = Expr::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(lhs),
+        right: Box::new(eq.rhs.clone()),
+    };
+
+    // Guards from enclosing `if` branches condition the equation:
+    // (g1 && ... && gn) => f(args) == leaf. Under the partial-function
+    // semantics, an instance whose guard terms are undefined is vacuously
+    // satisfied, so this introduces no new incompleteness class beyond the
+    // usual "instantiate the terms you need".
+    let axiom_body = match eq.guards.iter().cloned().reduce(|acc, g| Expr::BinOp {
+        op: BinOp::And,
+        left: Box::new(acc),
+        right: Box::new(g),
+    }) {
+        Some(guard_conj) => Expr::BinOp {
+            op: BinOp::Implies,
+            left: Box::new(guard_conj),
+            right: Box::new(eq_expr),
+        },
+        None => eq_expr,
+    };
+
+    // Wrap the equation in a Forall quantifier over all accumulated active binders.
+    let axiom = if eq.binders.is_empty() {
+        axiom_body
+    } else {
+        Expr::Forall {
+            binders: eq.binders.clone(),
+            body: Box::new(axiom_body),
+        }
+    };
+
+    // Pass this raw axiom through the standard transformation pipeline
+    // (ANF -> NNF -> RelAbs) just like the main verification goal.
+    // This flattens nested calls into `Let` bindings, pushes negations, and finally
+    // transforms them into relational logic (Implies), entirely avoiding sort cycles.
+    let mut gen = NameGenerator::new();
+    let anf_expr = anf_transform(&axiom, &mut gen);
+    let nnf_expr = nnf_transform(anf_expr);
+    let relabs_expr = relabs_transform(&nnf_expr, &program.functions);
+
+    // Convert the fully processed relation expression to SMT-LIB2 format and assert it.
+    let smt_expr = expr_to_smt(&mut ctx.smt, &relabs_expr).unwrap();
+    ctx.assert(smt_expr);
+}
+
+/// Recursively traverses a function body to flatten nested `Match`/`If`/`Let`
+/// expressions. Each leaf (no top-level `Match`) becomes one `DefEq` in `out`.
+fn collect_equations(
     expr: &Expr,
     args_map: &HashMap<Ident, Expr>,
     binders: &Vec<(Ident, BaseType)>,
     func_name: &str,
     params: &[(Ident, BaseType)],
     guards: &[Expr],
-    ctx: &mut Query,
     program: &Program,
+    out: &mut Vec<DefEq>,
 ) {
     if let Expr::Match {
         expr: match_target,
@@ -573,15 +672,15 @@ fn generate_axioms_from_body(
                 .collect();
 
             // Recursively process the substituted body of this arm
-            generate_axioms_from_body(
+            collect_equations(
                 &substituted_body,
                 &new_args_map,
                 &new_binders,
                 func_name,
                 params,
                 &substituted_guards,
-                ctx,
                 program,
+                out,
             );
         }
     } else if let Expr::If { cond, then_expr, else_expr } = expr {
@@ -593,8 +692,8 @@ fn generate_axioms_from_body(
         // inside `cond` get relationally abstracted along the way).
         let mut then_guards = guards.to_vec();
         then_guards.push((**cond).clone());
-        generate_axioms_from_body(
-            then_expr, args_map, binders, func_name, params, &then_guards, ctx, program,
+        collect_equations(
+            then_expr, args_map, binders, func_name, params, &then_guards, program, out,
         );
 
         let mut else_guards = guards.to_vec();
@@ -602,8 +701,8 @@ fn generate_axioms_from_body(
             op: UnOp::Not,
             expr: cond.clone(),
         });
-        generate_axioms_from_body(
-            else_expr, args_map, binders, func_name, params, &else_guards, ctx, program,
+        collect_equations(
+            else_expr, args_map, binders, func_name, params, &else_guards, program, out,
         );
     } else if let Expr::Let { pat, bound_expr, body } = expr {
         // The leaf pipeline cannot split an `if`/`match` hidden under a `let`,
@@ -618,8 +717,8 @@ fn generate_axioms_from_body(
         match pat {
             Pattern::Ident(name) if !is_match_scrutinee(name, body) => {
                 let substituted = frontend::env::substitute_expr(body, name, bound_expr);
-                generate_axioms_from_body(
-                    &substituted, args_map, binders, func_name, params, guards, ctx, program,
+                collect_equations(
+                    &substituted, args_map, binders, func_name, params, guards, program, out,
                 );
             }
             Pattern::Ident(name) => {
@@ -638,13 +737,13 @@ fn generate_axioms_from_body(
                     left: Box::new(Expr::Var(name.clone())),
                     right: bound_expr.clone(),
                 });
-                generate_axioms_from_body(
-                    body, args_map, &new_binders, func_name, params, &new_guards, ctx, program,
+                collect_equations(
+                    body, args_map, &new_binders, func_name, params, &new_guards, program, out,
                 );
             }
             // `let _ = e;` binds nothing in a function body.
-            Pattern::Wildcard => generate_axioms_from_body(
-                body, args_map, binders, func_name, params, guards, ctx, program,
+            Pattern::Wildcard => collect_equations(
+                body, args_map, binders, func_name, params, guards, program, out,
             ),
             other => panic!(
                 "unsupported let pattern {:?} in the body of `{}`",
@@ -652,65 +751,97 @@ fn generate_axioms_from_body(
             ),
         }
     } else {
-        // We have reached a leaf expression (no top-level `Match`).
-        // Construct the Left-Hand Side (LHS) of the equation using the original parameter order
-        // and the accumulated instantiations in `args_map`.
-        let mut lhs_args = Vec::new();
+        // We have reached a leaf expression (no top-level `Match`): one equation.
+        // Its argument patterns are the parameters in their original order with
+        // the accumulated pattern substitutions of `args_map` applied.
+        let mut args = Vec::new();
         for (p_name, _) in params {
-            lhs_args.push(args_map.get(p_name).unwrap().clone());
+            args.push(args_map.get(p_name).unwrap().clone());
         }
-
-        let lhs = Expr::Call {
+        out.push(DefEq {
             func: func_name.to_string(),
-            args: lhs_args,
-        };
+            binders: binders.clone(),
+            args,
+            guards: guards.to_vec(),
+            rhs: expr.clone(),
+        });
+    }
+}
 
-        // Form the equation: LHS == RHS (where RHS is the leaf expression)
-        let eq_expr = Expr::BinOp {
-            op: BinOp::Eq,
-            left: Box::new(lhs),
-            right: Box::new(expr.clone()),
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        // Guards from enclosing `if` branches condition the equation:
-        // (g1 && ... && gn) => f(args) == leaf. Under the partial-function
-        // semantics, an instance whose guard terms are undefined is vacuously
-        // satisfied, so this introduces no new incompleteness class beyond the
-        // usual "instantiate the terms you need".
-        let axiom_body = match guards.iter().cloned().reduce(|acc, g| Expr::BinOp {
-            op: BinOp::And,
-            left: Box::new(acc),
-            right: Box::new(g),
-        }) {
-            Some(guard_conj) => Expr::BinOp {
-                op: BinOp::Implies,
-                left: Box::new(guard_conj),
-                right: Box::new(eq_expr),
-            },
-            None => eq_expr,
-        };
+    // [ENG] A self-registered program (no names from the test suite): one datatype,
+    //       a recursive function, a function with a nested match and an `if`.
+    fn program() -> Program {
+        let mut program = Program { datatypes: HashMap::new(), functions: HashMap::new(), goals: Vec::new() };
+        frontend::api::register_enum(&mut program, "Peano", "enum Peano { Zero, Succ(Box<Peano>) }");
+        frontend::api::register_val(
+            &mut program,
+            "flag",
+            None,
+            "fn flag(x: Peano) -> bool { match x { Peano::Zero => true, Peano::Succ(_x1) => false } }",
+            false,
+        );
+        frontend::api::register_val(
+            &mut program,
+            "plus",
+            None,
+            "fn plus(x: Peano, y: Peano) -> Peano { match x { Peano::Zero => y, Peano::Succ(x1) => Peano::Succ(Box::new(plus(*x1, y))) } }",
+            true,
+        );
+        frontend::api::register_val(
+            &mut program,
+            "pick",
+            None,
+            "fn pick(x: Peano, y: Peano) -> Peano { match x { Peano::Zero => y, Peano::Succ(x1) => match y { Peano::Zero => x, Peano::Succ(y1) => if flag(*x1) { x } else { y } } } }",
+            false,
+        );
+        program
+    }
 
-        // Wrap the equation in a Forall quantifier over all accumulated active binders.
-        let axiom = if binders.is_empty() {
-            axiom_body
-        } else {
-            Expr::Forall {
-                binders: binders.clone(),
-                body: Box::new(axiom_body),
-            }
-        };
+    fn equations_for<'a>(eqs: &'a [DefEq], func: &str) -> Vec<&'a DefEq> {
+        eqs.iter().filter(|e| e.func == func).collect()
+    }
 
-        // Pass this raw axiom through the standard transformation pipeline
-        // (ANF -> NNF -> RelAbs) just like the main verification goal.
-        // This flattens nested calls into `Let` bindings, pushes negations, and finally
-        // transforms them into relational logic (Implies), entirely avoiding sort cycles.
-        let mut gen = NameGenerator::new();
-        let anf_expr = anf_transform(&axiom, &mut gen);
-        let nnf_expr = nnf_transform(anf_expr);
-        let relabs_expr = relabs_transform(&nnf_expr, &program.functions);
+    fn succ(inner: Expr) -> Expr {
+        Expr::Constructor { name: "Peano::Succ".to_string(), args: vec![inner] }
+    }
 
-        // Convert the fully processed relation expression to SMT-LIB2 format and assert it.
-        let smt_expr = expr_to_smt(&mut ctx.smt, &relabs_expr).unwrap();
-        ctx.assert(smt_expr);
+    #[test]
+    fn one_equation_per_leaf_with_patterns_guards_and_binders() {
+        let program = program();
+        let eqs = definitional_equations(&program);
+
+        // flag: two leaves, no guards.
+        let flag = equations_for(&eqs, "flag");
+        assert_eq!(flag.len(), 2);
+        assert!(flag.iter().all(|e| e.guards.is_empty()));
+
+        // plus: the Succ leaf has the pattern as its first argument, the untouched
+        // parameter as its second, and binders = the remaining parameter plus the
+        // pattern variable.
+        let plus = equations_for(&eqs, "plus");
+        assert_eq!(plus.len(), 2);
+        let succ_leaf = plus
+            .iter()
+            .find(|e| matches!(&e.args[0], Expr::Constructor { args, .. } if !args.is_empty()))
+            .expect("the Succ leaf of plus");
+        assert_eq!(succ_leaf.args, vec![succ(Expr::Var("x1".to_string())), Expr::Var("y".to_string())]);
+        assert_eq!(succ_leaf.rhs, succ(Expr::Call { func: "plus".to_string(), args: vec![Expr::Var("x1".to_string()), Expr::Var("y".to_string())] }));
+        let mut binders: Vec<_> = succ_leaf.binders.iter().map(|(n, _)| n.clone()).collect();
+        binders.sort();
+        assert_eq!(binders, vec!["x1".to_string(), "y".to_string()]);
+
+        // pick: four leaves; the two under the `if` carry the guard and its negation,
+        // and the matched variable is substituted by its pattern in the leaf.
+        let pick = equations_for(&eqs, "pick");
+        assert_eq!(pick.len(), 4);
+        let guarded: Vec<_> = pick.iter().filter(|e| !e.guards.is_empty()).collect();
+        assert_eq!(guarded.len(), 2);
+        let guard_call = Expr::Call { func: "flag".to_string(), args: vec![Expr::Var("x1".to_string())] };
+        assert!(guarded.iter().any(|e| e.guards == vec![guard_call.clone()] && e.rhs == succ(Expr::Var("x1".to_string()))));
+        assert!(guarded.iter().any(|e| matches!(&e.guards[0], Expr::UnOp { op: UnOp::Not, expr } if **expr == guard_call)));
     }
 }
