@@ -129,13 +129,6 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         let _ = fs::create_dir_all("logs");
     }
 
-    struct ProcessedGoal {
-        name: Ident,
-        skolem_vars: Vec<(Ident, BaseType)>,
-        relabs_expr: Expr,
-        instantiations: Vec<Expr>,
-    }
-
     let mut processed_goals = Vec::new();
     for goal in &program.goals {
         let negated_goal = Expr::UnOp {
@@ -208,181 +201,70 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     //       stop at the first failure.
     let mut failures: Vec<String> = Vec::new();
 
-    for goal in processed_goals {
-        let goal_name = goal.name;
+    // [ENG] The frontier engine's switches and, when it is on, the structured
+    //       equations it unfolds against (the same record the axioms are rendered from).
+    let frontier_cfg = crate::frontier::Config::from_env();
+    let equations = if frontier_cfg.enabled { definitional_equations(&program) } else { Vec::new() };
+
+    for mut goal in processed_goals {
+        let goal_name = goal.name.clone();
         println!(" Solving Goal: {}", goal_name);
 
         // [KOR] 질의는 항상 이 .smt2 파일에 쓰이고, 솔버는 그 파일에 대해 실행됩니다.
         // [ENG] The query is always written to this .smt2 file; the solver runs on it.
         let smt_log_path = format!("logs/{}_failed_query.smt2", goal_name);
 
-        let mut ctx = Query::new();
-
-        // [KOR] Unit 소트 선언 (프론트엔드에서 넘어올 수 있으므로)
-        ctx.declare_sort("Unit".to_string());
-        let unit_sort = ctx.smt.atom("Unit");
-        ctx.declare_const("unit_val".to_string(), unit_sort);
-
-        // 3.1. 소트(Sort) 선언
-        for (enum_name, _) in &program.datatypes {
-            let sort_name = render_sort(&BaseType::Custom(enum_name.clone()));
-            ctx.declare_sort(sort_name);
-        }
-
-        // 3.2. 데이터 생성자 (Constructors) 및 공리 선언
-        for (enum_name, variants) in &program.datatypes {
-            let out_type = BaseType::Custom(enum_name.clone());
-
-            // [KOR] 부분항 순서(subterm) 관계: 재귀 필드(자기 sort의 필드)를 가진 datatype에만 선언합니다.
-            // [ENG] Subterm order relation, declared only for datatypes with a recursive field.
-            let has_recursive_field = variants
-                .iter()
-                .any(|(_, args)| args.iter().any(|ty| *ty == out_type));
-            let sub_rel = sanitize_id(&format!("{}::subterm", enum_name));
-            if has_recursive_field {
-                let sub_args = vec![ctx.atom(render_sort(&out_type)), ctx.atom(render_sort(&out_type))];
-                ctx.declare_fun(sub_rel.clone(), sub_args, ctx.atom("Bool"));
+        // [KOR] 질의 조립(소트·생성자·공리·skolem 상수·증인·부정된 goal)은 `build_query`
+        //       (§6.1 1–10단계)로 옮겨졌고, 아래 루프가 라운드마다 다시 부릅니다.
+        //       기호적 경계 루프(RAVENCHECK_AUTO_INST, `doc/auto_instantiation_plan.md`
+        //       §5): 풀고, 증명되지 않으면 장부를 한 단계 전개해 빠진 적용 항을 힌트로
+        //       더한 뒤 다시 풉니다. 포화(라운드가 아무것도 더하지 못함)나 깊이 한도에서
+        //       멈춥니다. 꺼져 있으면 한 번 풀고 끝납니다.
+        // [ENG] Query assembly (sorts, constructors, axioms, skolem constants,
+        //       witnesses, negated goal) lives in `build_query` (§6.1 steps 1–10);
+        //       the loop below calls it once per round. The symbolic-frontier loop
+        //       (RAVENCHECK_AUTO_INST, `doc/auto_instantiation_plan.md` §5): solve;
+        //       if not proved, unfold the ledger one step, add the missing
+        //       applications as hints, solve again. Stops at saturation (a round
+        //       adds nothing) or at the depth cap. Off, it is a single solve.
+        let mut source_goal = program.goals.iter().find(|g| g.name == goal_name).cloned();
+        let mut shapes = crate::frontier::shape::Shapes::default();
+        let mut rounds: Vec<Vec<Expr>> = Vec::new();
+        let mut stop: Option<crate::frontier::Stop> = None;
+        let (verdict, model) = loop {
+            let ctx = build_query(&program, &goal);
+            let (verdict, model) = ctx.solve(&smt_log_path);
+            if verdict == Verdict::Unsat || !frontier_cfg.enabled {
+                break (verdict, model);
             }
-
-            for (cons_name, arg_types) in variants {
-                if arg_types.is_empty() {
-                    // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
-                    let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name));
-                    ctx.declare_const(const_name, ctx.atom(render_sort(&out_type)));
-                    // 상수는 Functionality와 Injectivity 공리가 필요 없습니다.
-                } else {
-                    // [KOR] 인자가 있는 생성자 (예: Nat::S)는 관계식으로 변환됨
-                    let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name));
-
-                    let mut smt_args = Vec::new();
-                    for ty in arg_types {
-                        smt_args.push(ctx.atom(render_sort(ty)));
-                    }
-                    smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
-
-                    // (declare-fun ...)
-                    ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
-
-                    // Functionality Axiom
-                    let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
-                    let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
-                    ctx.assert(func_ax_smt);
-
-                    // Injectivity Axiom
-                    let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
-                    let inj_ax_smt = expr_to_smt(&mut ctx.smt, &inj_ax).unwrap();
-                    ctx.assert(inj_ax_smt);
-
-                    // Subterm Step Axiom: each recursive field is a proper subterm of the result.
-                    for (i, ty) in arg_types.iter().enumerate() {
-                        if *ty == out_type {
-                            let step_ax =
-                                subterm_step_axiom(&rel_name, arg_types, i, &sub_rel, &out_type);
-                            let step_ax_smt = expr_to_smt(&mut ctx.smt, &step_ax).unwrap();
-                            ctx.assert(step_ax_smt);
-                        }
-                    }
+            let Some(src) = source_goal.as_mut() else {
+                break (verdict, model);
+            };
+            if rounds.len() >= frontier_cfg.depth {
+                stop = Some(crate::frontier::Stop::Limited { depth: frontier_cfg.depth });
+                break (verdict, model);
+            }
+            let round = crate::frontier::candidates::round(&equations, src, &mut shapes);
+            if frontier_cfg.suggest {
+                println!("{}", crate::frontier::suggestion(&round));
+                break (verdict, model);
+            }
+            if round.added.is_empty() {
+                stop = Some(crate::frontier::Stop::Saturated { stuck: round.stuck });
+                break (verdict, model);
+            }
+            if frontier_cfg.trace {
+                println!("  🔁 frontier round {}: +{} term(s)", rounds.len() + 1, round.added.len());
+                for t in &round.added {
+                    println!("       instantiate!({});", crate::frontier::render(t));
                 }
             }
-
-            // Disjointness Axiom
-            for i in 0..variants.len() {
-                for j in (i + 1)..variants.len() {
-                    let (cons1, args1) = &variants[i];
-                    let (cons2, args2) = &variants[j];
-
-                    let disj_ax =
-                        disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
-                    let disj_ax_smt = expr_to_smt(&mut ctx.smt, &disj_ax).unwrap();
-                    ctx.assert(disj_ax_smt);
-                }
+            for cand in &round.added {
+                src.instantiations.push(cand.clone());
+                goal.instantiations.push(relabs_hint(&program, cand));
             }
-
-            // Subterm order: transitive and irreflexive. With the step facts this
-            // excludes every finite constructor cycle (acyclicity), using only
-            // universal quantifiers, so the EPR fragment is preserved.
-            if has_recursive_field {
-                for ax in [
-                    subterm_transitivity_axiom(&sub_rel, &out_type),
-                    subterm_irreflexivity_axiom(&sub_rel, &out_type),
-                ] {
-                    let ax_smt = expr_to_smt(&mut ctx.smt, &ax).unwrap();
-                    ctx.assert(ax_smt);
-                }
-            }
-        }
-
-        // 3.3. 일반 함수 (Functions) 및 공리 선언
-        // [KOR] 두 단계로 나눕니다: 먼저 모든 함수의 관계를 선언하고, 그 다음에 정의
-        //       공리를 assert합니다. 한 함수의 정의 공리는 다른 함수의 관계를 참조할 수
-        //       있는데(예: count의 공리가 eq_nat_rel을 언급), `program.functions`는
-        //       HashMap이라 순회 순서가 실행마다 달라서, 단일 루프에서는 아직 선언되지
-        //       않은 관계를 참조하는 공리가 간헐적으로 solver 에러를 냈습니다.
-        // [ENG] Two phases: declare ALL function relations first, THEN assert
-        //       definitional axioms. A function's definitional axioms may reference
-        //       other functions' relations (e.g. count's axioms mention eq_nat_rel),
-        //       and `program.functions` is a HashMap with per-run iteration order --
-        //       a single loop intermittently asserted axioms referencing relations
-        //       that were not declared yet, killing the solver.
-        for (func_name, def) in &program.functions {
-            let (arg_types, out_type) = get_fun_types(&def.signature);
-            let rel_name = format!("{}_rel", func_name);
-
-            let mut smt_args = Vec::new();
-            for ty in &arg_types {
-                smt_args.push(ctx.atom(render_sort(ty)));
-            }
-            smt_args.push(ctx.atom(render_sort(&out_type)));
-
-            ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
-
-            let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
-            let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
-            ctx.assert(func_ax_smt);
-        }
-
-        for (func_name, def) in &program.functions {
-            let (_, out_type) = get_fun_types(&def.signature);
-
-            // [KOR] 본문이 있는 모든 "값 반환" 함수(재귀든 아니든)의 본문을 분해하여
-            //       브랜치별 정의 공리를 생성합니다. 비재귀 함수는 자기 호출이 0개인
-            //       재귀 함수일 뿐이며, 아래 leaf 케이스가 `forall params. f(params) == body`를
-            //       그대로 만들어냅니다. (G3)
-            //       Unit 반환 함수는 제외합니다: Lemma의 본문은 정의가 아니라 증명
-            //       스크립트이므로, `tip_x(..) == ()` 같은 공리는 무의미하고 그 Tuple
-            //       leaf는 expr_to_smt에서 panic합니다.
-            // [ENG] Emit per-branch definitional axioms for EVERY bodied, value-returning
-            //       function (recursive or not) -- a non-recursive function is just a
-            //       recursive function with zero self-calls; the leaf case below emits
-            //       `forall params. f(params) == body` as-is. (G3)
-            //       Unit-returning functions are excluded: lemma bodies are proof
-            //       scripts, not definitions -- a `tip_x(..) == ()` axiom would be
-            //       meaningless and its Tuple leaf panics in expr_to_smt.
-            if out_type != BaseType::Unit {
-                for eq in equations_of(func_name, def, &program) {
-                    assert_equation(&mut ctx, &program, &eq);
-                }
-            }
-        }
-
-        // 3.4. Skolem Variables 및 Instantiations 추가
-        // [KOR] Phase 2에서 뽑아낸 전역 상수(Skolem variables)들을 선언합니다.
-        for (var_name, var_type) in &goal.skolem_vars {
-            ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type)));
-        }
-
-        // [KOR] Phase 3에서 변환한 인스턴스화 공리들을 각각 별도의 assert(exists ...) 구문으로 꽂아 넣습니다.
-        for inst_expr in &goal.instantiations {
-            let inst_smt = expr_to_smt(&mut ctx.smt, inst_expr).unwrap();
-            ctx.assert(inst_smt);
-        }
-
-        // 3.5. 최종 검증 (Assert negated goal and check-sat)
-        let goal_smt = expr_to_smt(&mut ctx.smt, &goal.relabs_expr).unwrap();
-        // println!("Goal SMT: {}", ctx.display(goal_smt)); // 너무 길면 주석 처리
-        ctx.assert(goal_smt);
-
-        let (verdict, model) = ctx.solve(&smt_log_path);
+            rounds.push(round.added);
+        };
         if verdict != Verdict::Unsat {
             // [KOR] 반례 파일을 소스 어휘로 방출합니다. 파일은 goal과 그 인스턴스화
             //       목록(ledger)에서 만들어지며 solver 모델을 읽지 않으므로, 답이
@@ -434,6 +316,10 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 }
                 println!("{}", json);
             }
+            // [ENG] What the frontier did before giving up, if it ran.
+            if let Some(stop) = &stop {
+                cex_line.push_str(&crate::frontier::stop_report(stop, &rounds));
+            }
             failures.push(if verdict == Verdict::Sat {
                 format!(
                     "Failed to verify '{}': solver found counterexamples.\n## > 💾 Check the SMT query at: {}{}",
@@ -458,6 +344,9 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 "  ✅ [Verified] Solver returned UNSAT (Theorem {} is valid!)",
                 goal_name
             );
+            if !rounds.is_empty() {
+                print!("{}", crate::frontier::verified_report(&rounds, source_goal.as_ref()));
+            }
         }
     }
 
@@ -466,6 +355,206 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
     } else {
         Err(failures.join("\n##\n## > "))
     }
+}
+
+/// [ENG] A goal after phase A: negated, ANF'd, NNF'd, skolemized, relationally
+///       abstracted; its hints likewise. The frontier loop appends to
+///       `instantiations` between rounds.
+struct ProcessedGoal {
+    name: Ident,
+    skolem_vars: Vec<(Ident, BaseType)>,
+    relabs_expr: Expr,
+    instantiations: Vec<Expr>,
+}
+
+/// [KOR] 힌트 하나를 goal의 힌트와 같은 경로로 변환합니다: Instantiate → ANF → NNF →
+///       RelAbs. 경계 루프가 라운드 사이에 더하는 후보에 씁니다.
+/// [ENG] One hint through the same path as the goal's own hints:
+///       Instantiate → ANF → NNF → RelAbs. Used by the frontier loop for the
+///       candidates it adds between rounds (fresh ANF names are fine: each hint is
+///       its own `(assert (exists ...))`).
+fn relabs_hint(program: &Program, hint: &Expr) -> Expr {
+    let inst_expr = Expr::Instantiate(Box::new(hint.clone()));
+    let mut gen = NameGenerator::new();
+    let anf_inst = anf_transform(&inst_expr, &mut gen);
+    let nnf_inst = nnf_transform(anf_inst);
+    relabs_transform(&nnf_inst, &program.functions)
+}
+
+/// [KOR] 한 goal의 질의를 처음부터 조립합니다 (§6.1의 1–10단계): 소트, 생성자와 구조
+///       공리, 함수 관계와 functionality, 정의 공리, skolem 상수, 인스턴스화 증인,
+///       부정된 goal. 경계 루프는 라운드마다 이 함수를 다시 부릅니다.
+/// [ENG] Assembles one goal's query from scratch (steps 1–10 of §6.1): sorts,
+///       constructors with their structural axioms, function relations with
+///       functionality, definitional axioms, skolem constants, instantiation
+///       witnesses, the negated goal. The frontier loop calls it once per round.
+fn build_query(program: &Program, goal: &ProcessedGoal) -> Query {
+    let mut ctx = Query::new();
+
+    // [KOR] Unit 소트 선언 (프론트엔드에서 넘어올 수 있으므로)
+    ctx.declare_sort("Unit".to_string());
+    let unit_sort = ctx.smt.atom("Unit");
+    ctx.declare_const("unit_val".to_string(), unit_sort);
+
+    // 3.1. 소트(Sort) 선언
+    for (enum_name, _) in &program.datatypes {
+        let sort_name = render_sort(&BaseType::Custom(enum_name.clone()));
+        ctx.declare_sort(sort_name);
+    }
+
+    // 3.2. 데이터 생성자 (Constructors) 및 공리 선언
+    for (enum_name, variants) in &program.datatypes {
+        let out_type = BaseType::Custom(enum_name.clone());
+
+        // [KOR] 부분항 순서(subterm) 관계: 재귀 필드(자기 sort의 필드)를 가진 datatype에만 선언합니다.
+        // [ENG] Subterm order relation, declared only for datatypes with a recursive field.
+        let has_recursive_field = variants
+            .iter()
+            .any(|(_, args)| args.iter().any(|ty| *ty == out_type));
+        let sub_rel = sanitize_id(&format!("{}::subterm", enum_name));
+        if has_recursive_field {
+            let sub_args = vec![ctx.atom(render_sort(&out_type)), ctx.atom(render_sort(&out_type))];
+            ctx.declare_fun(sub_rel.clone(), sub_args, ctx.atom("Bool"));
+        }
+
+        for (cons_name, arg_types) in variants {
+            if arg_types.is_empty() {
+                // [KOR] 인자가 없는 생성자 (예: Nat::Z)는 상수로 선언합니다.
+                let const_name = sanitize_id(&format!("{}::{}", enum_name, cons_name));
+                ctx.declare_const(const_name, ctx.atom(render_sort(&out_type)));
+                // 상수는 Functionality와 Injectivity 공리가 필요 없습니다.
+            } else {
+                // [KOR] 인자가 있는 생성자 (예: Nat::S)는 관계식으로 변환됨
+                let rel_name = sanitize_id(&format!("{}::{}_rel", enum_name, cons_name));
+
+                let mut smt_args = Vec::new();
+                for ty in arg_types {
+                    smt_args.push(ctx.atom(render_sort(ty)));
+                }
+                smt_args.push(ctx.atom(render_sort(&out_type))); // output argument
+
+                // (declare-fun ...)
+                ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
+
+                // Functionality Axiom
+                let func_ax = functionality_axiom(&rel_name, arg_types, &out_type);
+                let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
+                ctx.assert(func_ax_smt);
+
+                // Injectivity Axiom
+                let inj_ax = injectivity_axiom(&rel_name, arg_types, &out_type);
+                let inj_ax_smt = expr_to_smt(&mut ctx.smt, &inj_ax).unwrap();
+                ctx.assert(inj_ax_smt);
+
+                // Subterm Step Axiom: each recursive field is a proper subterm of the result.
+                for (i, ty) in arg_types.iter().enumerate() {
+                    if *ty == out_type {
+                        let step_ax =
+                            subterm_step_axiom(&rel_name, arg_types, i, &sub_rel, &out_type);
+                        let step_ax_smt = expr_to_smt(&mut ctx.smt, &step_ax).unwrap();
+                        ctx.assert(step_ax_smt);
+                    }
+                }
+            }
+        }
+
+        // Disjointness Axiom
+        for i in 0..variants.len() {
+            for j in (i + 1)..variants.len() {
+                let (cons1, args1) = &variants[i];
+                let (cons2, args2) = &variants[j];
+
+                let disj_ax =
+                    disjointness_axiom(enum_name, cons1, args1, cons2, args2, &out_type);
+                let disj_ax_smt = expr_to_smt(&mut ctx.smt, &disj_ax).unwrap();
+                ctx.assert(disj_ax_smt);
+            }
+        }
+
+        // Subterm order: transitive and irreflexive. With the step facts this
+        // excludes every finite constructor cycle (acyclicity), using only
+        // universal quantifiers, so the EPR fragment is preserved.
+        if has_recursive_field {
+            for ax in [
+                subterm_transitivity_axiom(&sub_rel, &out_type),
+                subterm_irreflexivity_axiom(&sub_rel, &out_type),
+            ] {
+                let ax_smt = expr_to_smt(&mut ctx.smt, &ax).unwrap();
+                ctx.assert(ax_smt);
+            }
+        }
+    }
+
+    // 3.3. 일반 함수 (Functions) 및 공리 선언
+    // [KOR] 두 단계로 나눕니다: 먼저 모든 함수의 관계를 선언하고, 그 다음에 정의
+    //       공리를 assert합니다. 한 함수의 정의 공리는 다른 함수의 관계를 참조할 수
+    //       있는데(예: count의 공리가 eq_nat_rel을 언급), `program.functions`는
+    //       HashMap이라 순회 순서가 실행마다 달라서, 단일 루프에서는 아직 선언되지
+    //       않은 관계를 참조하는 공리가 간헐적으로 solver 에러를 냈습니다.
+    // [ENG] Two phases: declare ALL function relations first, THEN assert
+    //       definitional axioms. A function's definitional axioms may reference
+    //       other functions' relations (e.g. count's axioms mention eq_nat_rel),
+    //       and `program.functions` is a HashMap with per-run iteration order --
+    //       a single loop intermittently asserted axioms referencing relations
+    //       that were not declared yet, killing the solver.
+    for (func_name, def) in &program.functions {
+        let (arg_types, out_type) = get_fun_types(&def.signature);
+        let rel_name = format!("{}_rel", func_name);
+
+        let mut smt_args = Vec::new();
+        for ty in &arg_types {
+            smt_args.push(ctx.atom(render_sort(ty)));
+        }
+        smt_args.push(ctx.atom(render_sort(&out_type)));
+
+        ctx.declare_fun(rel_name.clone(), smt_args, ctx.atom("Bool"));
+
+        let func_ax = functionality_axiom(&rel_name, &arg_types, &out_type);
+        let func_ax_smt = expr_to_smt(&mut ctx.smt, &func_ax).unwrap();
+        ctx.assert(func_ax_smt);
+    }
+
+    for (func_name, def) in &program.functions {
+        let (_, out_type) = get_fun_types(&def.signature);
+
+        // [KOR] 본문이 있는 모든 "값 반환" 함수(재귀든 아니든)의 본문을 분해하여
+        //       브랜치별 정의 공리를 생성합니다. 비재귀 함수는 자기 호출이 0개인
+        //       재귀 함수일 뿐이며, 아래 leaf 케이스가 `forall params. f(params) == body`를
+        //       그대로 만들어냅니다. (G3)
+        //       Unit 반환 함수는 제외합니다: Lemma의 본문은 정의가 아니라 증명
+        //       스크립트이므로, `tip_x(..) == ()` 같은 공리는 무의미하고 그 Tuple
+        //       leaf는 expr_to_smt에서 panic합니다.
+        // [ENG] Emit per-branch definitional axioms for EVERY bodied, value-returning
+        //       function (recursive or not) -- a non-recursive function is just a
+        //       recursive function with zero self-calls; the leaf case below emits
+        //       `forall params. f(params) == body` as-is. (G3)
+        //       Unit-returning functions are excluded: lemma bodies are proof
+        //       scripts, not definitions -- a `tip_x(..) == ()` axiom would be
+        //       meaningless and its Tuple leaf panics in expr_to_smt.
+        if out_type != BaseType::Unit {
+            for eq in equations_of(func_name, def, program) {
+                assert_equation(&mut ctx, program, &eq);
+            }
+        }
+    }
+
+    // 3.4. Skolem Variables 및 Instantiations 추가
+    // [KOR] Phase 2에서 뽑아낸 전역 상수(Skolem variables)들을 선언합니다.
+    for (var_name, var_type) in &goal.skolem_vars {
+        ctx.declare_const(sanitize_id(var_name), ctx.atom(render_sort(var_type)));
+    }
+
+    // [KOR] Phase 3에서 변환한 인스턴스화 공리들을 각각 별도의 assert(exists ...) 구문으로 꽂아 넣습니다.
+    for inst_expr in &goal.instantiations {
+        let inst_smt = expr_to_smt(&mut ctx.smt, inst_expr).unwrap();
+        ctx.assert(inst_smt);
+    }
+
+    // 3.5. 최종 검증 (Assert negated goal and check-sat)
+    let goal_smt = expr_to_smt(&mut ctx.smt, &goal.relabs_expr).unwrap();
+    ctx.assert(goal_smt);
+
+    ctx
 }
 
 /// [KOR] 함수의 가드된 정의 등식 하나: match/if 트리의 잎 하나. `args`는 둘러싼
