@@ -51,6 +51,14 @@ impl Shapes {
     ///       `implies`), and any hypothesis equality with a constructor side.
     pub fn from_goal(parts: &VcParts) -> Shapes {
         let mut shapes = Shapes::default();
+        shapes.seed_from(parts);
+        shapes
+    }
+
+    /// [ENG] Adds the goal's shapes to an existing environment (idempotent: an
+    ///       existing shape is kept), so a round can be run on any environment and
+    ///       derived shapes survive across rounds.
+    pub fn seed_from(&mut self, parts: &VcParts) {
         let mut equalities: Vec<&Expr> = parts.path_conds.iter().collect();
         equalities.extend(parts.goal.assumptions.iter());
         for h in &parts.hypotheses {
@@ -58,10 +66,9 @@ impl Shapes {
         }
         for e in equalities {
             if let Some((t, c)) = as_shape_equality(e) {
-                shapes.insert(t, c);
+                self.insert(t, c);
             }
         }
-        shapes
     }
 
     fn insert(&mut self, t: Expr, c: Expr) {
