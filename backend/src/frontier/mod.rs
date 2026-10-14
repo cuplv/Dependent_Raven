@@ -22,12 +22,12 @@ use crate::frontier::candidates::Round;
 /// [KOR] 환경 변수로 켜고 끄는 스위치.
 ///   RAVENCHECK_AUTO_INST=0        루프를 끕니다 (기본은 켜짐)
 ///   RAVENCHECK_AUTO_INST=suggest  한 라운드만 계산해 후보를 출력하고 더하지 않음
-///   RAVENCHECK_AUTO_INST_DEPTH=N  goal당 라운드 상한 (기본 8)
+///   RAVENCHECK_AUTO_INST_DEPTH=N  goal당 라운드 상한 (기본 4)
 ///   RAVENCHECK_AUTO_INST_TRACE=1  더한 항과 멈춘 이유를 출력 (기본은 아무것도 출력하지 않음)
 /// [ENG] Switches, from the environment:
 ///   RAVENCHECK_AUTO_INST=0        turn the loop off (on by default)
 ///   RAVENCHECK_AUTO_INST=suggest  compute one round, print the candidates, add nothing
-///   RAVENCHECK_AUTO_INST_DEPTH=N  cap on rounds per goal (default 8)
+///   RAVENCHECK_AUTO_INST_DEPTH=N  cap on rounds per goal (default 4)
 ///   RAVENCHECK_AUTO_INST_TRACE=1  print the terms added, by round, and why the loop
 ///                                 stopped; silent otherwise
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ impl Config {
         let depth = std::env::var("RAVENCHECK_AUTO_INST_DEPTH")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(8);
+            .unwrap_or(4);
         Config {
             enabled,
             suggest: mode == "suggest",
