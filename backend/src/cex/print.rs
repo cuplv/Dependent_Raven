@@ -13,18 +13,19 @@
 //! by their variant name with the enum prefix stripped
 //! (`Nat::S(x)` -> `(S x)`, `Nat::Z` -> `Z`).
 //!
-//! [KOR] 항 위치에 올 수 있는 노드는 Var / Call / Constructor / BoolConst
-//! 뿐입니다. 그 외의 노드(Match, Let, 양화사, 백엔드 전용 노드 등)가
-//! 들어오면 파이프라인 불변식이 깨진 것이므로 조용히 잘못 찍는 대신
-//! panic으로 크게 실패합니다.
-//! [ENG] Only Var / Call / Constructor / BoolConst can occur in term
-//! position. Any other node (Match, Let, quantifiers, backend-only nodes,
-//! ...) means a pipeline invariant broke, so we fail loudly with a panic
-//! instead of silently misprinting.
+//! [KOR] 항 위치에 올 수 있는 노드는 Var / Call / Constructor / BoolConst와,
+//! Bool 값 인자로서의 연결사(UnOp / BinOp)뿐입니다. 그 외의 노드(Match, Let,
+//! 양화사, 백엔드 전용 노드 등)가 들어오면 파이프라인 불변식이 깨진
+//! 것이므로 조용히 잘못 찍는 대신 panic으로 크게 실패합니다.
+//! [ENG] Only Var / Call / Constructor / BoolConst, and a connective (UnOp /
+//! BinOp) as a Bool-valued argument, can occur in term position. Any other
+//! node (Match, Let, quantifiers, backend-only nodes, ...) means a pipeline
+//! invariant broke, so we fail loudly with a panic instead of silently
+//! misprinting.
 
 use std::collections::BTreeSet;
 
-use frontend::ast::{BaseType, Expr, Ident, Program};
+use frontend::ast::{BaseType, BinOp, Expr, Ident, Program, UnOp};
 
 use crate::smt::get_fun_types;
 
@@ -36,6 +37,20 @@ pub fn print_term(e: &Expr) -> String {
         Expr::BoolConst(b) => b.to_string(),
         Expr::Call { func, args } => print_application(func, args),
         Expr::Constructor { name, args } => print_application(variant_name(name), args),
+        // [KOR] Bool 값 인자(`Value::Bool(!b)`, `C(a == b)`)는 연결사째로 항입니다.
+        // [ENG] A Bool-valued argument (`Value::Bool(!b)`, `C(a == b)`) is a
+        //       term together with its connective.
+        Expr::UnOp { op: UnOp::Not, expr } => format!("(not {})", print_term(expr)),
+        Expr::BinOp { op, left, right } => {
+            let name = match op {
+                BinOp::Eq => "=",
+                BinOp::Neq => "distinct",
+                BinOp::And => "and",
+                BinOp::Or => "or",
+                BinOp::Implies => "=>",
+            };
+            format!("({} {} {})", name, print_term(left), print_term(right))
+        }
         other => panic!(
             "counterexample printer: expression is not a source-level term: {:?}",
             other
@@ -309,6 +324,19 @@ mod tests {
         // sub(sub(i, j), k)  ->  (sub (sub i j) k)
         let term = call("sub", vec![call("sub", vec![var("i"), var("j")]), var("k")]);
         assert_eq!(print_term(&term), "(sub (sub i j) k)");
+    }
+
+    #[test]
+    fn bool_connectives_in_argument_position() {
+        // Flag::Mk(!b)  ->  (Mk (not b));   pick(x == y)  ->  (pick (= x y))
+        let not_b = Expr::UnOp { op: UnOp::Not, expr: Box::new(var("b")) };
+        assert_eq!(print_term(&cons("Flag::Mk", vec![not_b])), "(Mk (not b))");
+        let eq = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(var("x")),
+            right: Box::new(var("y")),
+        };
+        assert_eq!(print_term(&call("pick", vec![eq])), "(pick (= x y))");
     }
 
     #[test]
