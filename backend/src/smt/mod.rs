@@ -218,15 +218,18 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         //       (§6.1 1–10단계)로 옮겨졌고, 아래 루프가 라운드마다 다시 부릅니다.
         //       기호적 경계 루프(RAVENCHECK_AUTO_INST, `doc/auto_instantiation_plan.md`
         //       §5): 풀고, 증명되지 않으면 장부를 한 단계 전개해 빠진 적용 항을 힌트로
-        //       더한 뒤 다시 풉니다. 포화(라운드가 아무것도 더하지 못함)나 깊이 한도에서
-        //       멈춥니다. 꺼져 있으면 한 번 풀고 끝납니다.
+        //       더한 뒤 다시 풉니다. 포화(라운드가 아무것도 더하지 못함)나 깊이 한도,
+        //       또는 solver가 UNKNOWN(시간 초과)을 내면 멈춥니다. 꺼져 있으면 한 번
+        //       풀고 끝납니다.
         // [ENG] Query assembly (sorts, constructors, axioms, skolem constants,
         //       witnesses, negated goal) lives in `build_query` (§6.1 steps 1–10);
         //       the loop below calls it once per round. The symbolic-frontier loop
         //       (RAVENCHECK_AUTO_INST, `doc/auto_instantiation_plan.md` §5): solve;
         //       if not proved, unfold the ledger one step, add the missing
         //       applications as hints, solve again. Stops at saturation (a round
-        //       adds nothing) or at the depth cap. Off, it is a single solve.
+        //       adds nothing), at the depth cap, or on an UNKNOWN answer (a timed
+        //       out query would only time out again with more terms). Off, it is
+        //       a single solve.
         let mut source_goal = program.goals.iter().find(|g| g.name == goal_name).cloned();
         let mut shapes = crate::frontier::shape::Shapes::default();
         let mut rounds: Vec<Vec<Expr>> = Vec::new();
@@ -234,7 +237,7 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
         let (verdict, model) = loop {
             let ctx = build_query(&program, &goal);
             let (verdict, model) = ctx.solve(&smt_log_path);
-            if verdict == Verdict::Unsat || !frontier_cfg.enabled {
+            if verdict != Verdict::Sat || !frontier_cfg.enabled {
                 break (verdict, model);
             }
             let Some(src) = source_goal.as_mut() else {
