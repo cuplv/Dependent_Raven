@@ -32,8 +32,11 @@ true of every real (total) function. The only risk is a wasted round.
 - the model `test_suite/logs/<lemma>_vc_<k>_model.json`, written for every
   goal the solver answers `sat`.
 
-Run from the repository root: `cargo test -p test_suite --test <file>`. One
-run reports every failing goal. Logs are keyed by lemma name, so two files
+Run from the repository root:
+`cargo test -p test_suite --test <file> 2>&1 | grep -E "Verified|Failed to verify|cannot proceed|test result"`
+— the failure block prints every countermodel, and the model is read from
+its file, not from the terminal. One run reports every failing goal. Logs
+are keyed by lemma name, so two files
 sharing a lemma name overwrite each other's logs. A goal reported `UNKNOWN`
 has no model: report it as such and stop on it.
 

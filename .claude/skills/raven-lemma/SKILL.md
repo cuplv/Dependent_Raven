@@ -71,7 +71,9 @@ The source `test_suite/tests/<file>.rs`; the failing goal's model
 `test_suite/logs/<lemma>_vc_<k>_model.json`; and the instantiate skill's
 STOP report, the stuck goal term and the application no hint can close (or
 a goal still `sat` with its hints in place). Run from the repository root:
-`cargo test -p test_suite --test <file>`. One run reports every failing goal;
+`cargo test -p test_suite --test <file> 2>&1 | grep -E "Verified|Failed to verify|cannot proceed|test result"`
+— the failure block prints every countermodel, and the models are read from
+their files, not from the terminal. One run reports every failing goal;
 a helper's goals are named after the helper (`app_nil_vc_2`) and appear in
 the same run as the target's. Logs are keyed by lemma name.
 
