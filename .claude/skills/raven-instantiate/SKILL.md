@@ -6,9 +6,9 @@ description: Repair a failed ravencheck proof by adding missing instantiate!
   test_suite proof fails with "solver found counterexamples". Adds hints only;
   when the model shows the failure is not a missing hint, reports STOP with
   the stuck term and the application no hint can close, the evidence that a
-  lemma is needed. This is the instantiation stage of
-  raven-lemma, which owns the handoff to lemmas; invoked directly, it stands
-  alone and finishes with the same report.
+  lemma is needed. This is the instantiation stage of raven-lemma. As its
+  gate, STOP hands control back to raven-lemma for its step 2; invoked
+  directly, STOP is the final answer.
 ---
 
 # raven-instantiate
@@ -122,7 +122,9 @@ round and branch. **STOP**: instantiation cannot close it — for each goal
 still red, the stuck goal term and the application no hint can close, the
 evidence that a lemma is needed; no edit made for it, hints that were
 independently useful stay. No classification: which lemma or case split it
-calls for is the lemma skill's reading of the same model.
+calls for is the lemma skill's reading of the same model. As the gate of
+raven-lemma, STOP hands control back to it for its step 2, in the same
+turn; invoked directly, STOP is the final answer.
 
 ## 9. What to open, and when
 

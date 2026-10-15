@@ -14,6 +14,12 @@ description: Close a failed ravencheck proof end to end. This is the
 
 # raven-lemma
 
+You are closing a proof. The deliverable is a verified file, or a stop from
+§7 with its evidence. A report that ends before either is not an output of
+this skill: the gate's STOP report (§5 step 1) is that step's result, not
+the end of the task, and the size of the proof ahead is not a reason to
+stop or to ask.
+
 ## 1. Background: the two ways a proof gets stuck
 
 Functions reach the solver as relations with their defining equations, and
@@ -81,7 +87,8 @@ the same run as the target's. Logs are keyed by lemma name.
 
 1. **Gate.** Run `raven-instantiate` on the file, always. DISCHARGED → done.
    Proceed only on STOP: a gap a hint can close is not a missing fact, so no
-   lemma is hypothesized before instantiation has stopped.
+   lemma is hypothesized before instantiation has stopped. The gate's report
+   is intermediate: continue with step 2 in the same turn.
 2. **Intake.** For each goal still red: the instantiate skill's report — the
    stuck goal term and the application no hint can close — the model, and
    the source arm with its branch and hypotheses. These are the evidence;
