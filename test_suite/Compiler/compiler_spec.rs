@@ -620,21 +620,6 @@ mod compiler_spec {
         eval(e, env) == EvRes::Ok(v),
         exec(app(compile(e), rest), ops, env) == exec(rest, VList::VCons(v, Box::new(ops)), env))))]
     fn compile_correct(e: Expr, env: Env, v: Value, rest: IList, ops: VList) {
-        match e {
-            Expr::Const(d) => (),
-            Expr::Id(x) => (),
-            Expr::Add(e1, e2) => (),
-            Expr::Sub(e1, e2) => (),
-            Expr::Mul(e1, e2) => (),
-            Expr::Div(e1, e2) => (),
-            Expr::Geq(e1, e2) => (),
-            Expr::Gt(e1, e2) => (),
-            Expr::Eq(e1, e2) => (),
-            Expr::And(e1, e2) => (),
-            Expr::Or(e1, e2) => (),
-            Expr::Not(e1) => (),
-            Expr::IfThenElse(c, t, f) => (),
-            Expr::Let(x, e1, e2) => (),
-        }
+        ()
     }
 }
