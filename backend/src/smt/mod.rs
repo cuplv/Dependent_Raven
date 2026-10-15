@@ -301,9 +301,10 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                 String::new()
             };
             // [KOR] 반례 모델: `sat`을 낸 바로 그 z3 실행의 유한 모델을 CamlStar의 JSON
-            //       형식으로 파일에 쓰고 출력합니다.
+            //       형식으로 파일에 쓰고, 실패 보고 안에 goal의 분기와 함께 출력합니다.
             // [ENG] The countermodel: the finite model of the very z3 run that
-            //       answered `sat`, written and printed in CamlStar's JSON form.
+            //       answered `sat`, written in CamlStar's JSON form and printed
+            //       inside the failure report, after the goal's branch.
             if let Some(model) = &model {
                 let json = crate::model::print::camlstar_json(model, &program, &goal.skolem_vars);
                 let model_path = format!("logs/{}_model.json", goal_name);
@@ -311,7 +312,13 @@ pub fn encode_and_solve(program: Program) -> Result<(), String> {
                     Ok(()) => cex_line.push_str(&format!("\n## > 💾 Model: {}", model_path)),
                     Err(e) => println!("  ⚠️ Failed to write model {}: {}", model_path, e),
                 }
-                println!("{}", json);
+                if let Some(src) = &source_goal {
+                    cex_line.push_str(&format!(
+                        "\n## > Branch: {}",
+                        crate::frontier::branch_line(src)
+                    ));
+                }
+                cex_line.push_str(&format!("\n## > Countermodel:\n{}", json));
             }
             // [ENG] What the frontier did before giving up, if it ran (trace only).
             if let (true, Some(stop)) = (frontier_cfg.trace, &stop) {

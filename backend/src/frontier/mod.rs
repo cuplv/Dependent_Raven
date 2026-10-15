@@ -85,7 +85,7 @@ fn render_args(args: &[Expr]) -> String {
 }
 
 /// [ENG] The goal's branch, as `v = C(..)` pairs, for the report.
-fn branch_line(goal: &Goal) -> String {
+pub fn branch_line(goal: &Goal) -> String {
     let parts = dissect(&goal.property);
     let conds: Vec<String> = parts
         .path_conds
