@@ -109,8 +109,12 @@ the same run as the target's. Logs are keyed by lemma name.
 
 None by default. Report the depth of unproven conjectures at every round; at
 depth 3 and each level beyond, pause and show the chain before continuing —
-a chain that deep usually means the decomposition is wrong. `depth-limit N`
-/ `lemma-limit N` in the invocation turn these into hard stops when wanted.
+a chain that deep usually means the decomposition is wrong. Depth counts
+helpers that exist and are still red, at the moment one is added; a
+predicted chain is not depth, and nothing pauses before the first helper is
+constructed. The skill runs to a verdict without asking: it stops only at
+the stops of §7, or at the depth pause once reached. `depth-limit N` /
+`lemma-limit N` in the invocation turn these into hard stops when wanted.
 Two constructed candidates per goal before re-reading the model.
 
 ## 7. Stops
